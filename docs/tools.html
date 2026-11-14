@@ -58,14 +58,17 @@ ToolContext = { scope, threadKey,
 → drives the tools, the memory
   and the prompt's situation</span></span></div>
 
-<div style="position: absolute; left: 880px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">bind(tools, context)</b> <span style="color: #5E5E58">· rules on each ToolDef</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">tool                     rules
+<div style="position: absolute; left: 880px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">bind(tools, context)</b> <span style="color: #5E5E58">· rules on each ToolDef</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">tool                       rules
 memory_list · memory_read  all
-memory_write             owner
-search_conversations     all
-send                     all (+ target's
-                         rules)
+memory_write               owner (all if
+                           MEMORY_WRITERS=all)
+search_conversations       all
+read_conversation          all (privacy rule)
+search_messages            owner (all if
+                           PRIVACY=off)
+send                       all (+ target's rules)
 set · list · cancel_reminder  all
-start_code_task          all (if runner)
+start · abandon_code_task  all (if runner)
 
 keeps tools that allows(rules, scope)
 accepts, rechecks at execution;

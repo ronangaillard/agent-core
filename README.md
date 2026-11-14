@@ -26,13 +26,13 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/db.ts` | The SQLite schema and transactions |
 | `src/store.ts` | Every read and write of the tables |
 | `src/core.ts` | The inbound queue (lot, settle, attempts, backoff), `respond()`, the outbound queue and delivery, the scheduler, `send()` |
-| `src/act.ts` | The tools that act: `send`, `set_reminder`, `list_reminders`, `cancel_reminder` |
+| `src/act.ts` | The tools that act or reach elsewhere: `send`, `read_conversation`, `search_messages`, `set_reminder`, `list_reminders`, `cancel_reminder` |
 | `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
-| `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves |
+| `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |
 | `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
-| `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
-| `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, the `<in_progress>` block |
+| `src/history.ts` | The `<elsewhere>` digest and `search_conversations`, on `events` |
+| `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, `abandon_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
 | `src/runners/apercu.ts` | A remote terminal for the runner: steve-apercu's workshop, a container per copy |
 | `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
