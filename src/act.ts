@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Core } from "./core.ts";
-import type { ToolDef } from "./types.ts";
+import type { ToolContext, ToolDef } from "./types.ts";
 
 const YEAR_MS = 365 * 24 * 3600_000;
 
@@ -21,11 +21,24 @@ export function actTools(core: Core): ToolDef[] {
     },
     {
       name: "read_conversation",
-      description: "Read in full another conversation you took part in, given one of its messages (message:<id>, from <elsewhere> or search_conversations).",
-      input: { message: z.string().describe("message:<id>") },
+      description:
+        "Read in full another conversation, given one of its messages: message:<id> (from <elsewhere> or search_conversations) or found:<n> (from search_messages).",
+      input: { message: z.string().describe("message:<id> or found:<n>") },
       rules: ["all"],
       run: (args, context) => core.readConversation(context, String(args.message)),
     },
+    ...(core.searchable()
+      ? [
+          {
+            name: "search_messages",
+            description:
+              "Search all the messages of the workspace (Slack…), not only your conversations, with the owner's rights: when something talked about likely comes from a conversation you were not in. Then read_conversation with a found:<n>.",
+            input: { query: z.string().min(1).describe("Words, as in the app's search box"), limit: z.number().int().min(1).max(20).optional() },
+            rules: ["owner" as const],
+            run: (args: Record<string, unknown>, context: ToolContext) => core.searchMessages(context, String(args.query), Number(args.limit ?? 10)),
+          },
+        ]
+      : []),
     {
       name: "set_reminder",
       description: "Be woken up later in this conversation, with this note. The note is all you will have: make it self-contained.",

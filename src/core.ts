@@ -434,8 +434,41 @@ export class Core {
     return { ownerId: this.config.ownerId, on: this.config.privacy };
   }
 
+  /** What search_messages found, by ref (found:<n>), for read_conversation: the last 500, in memory. */
+  private readonly found = new Map<number, { connector: string; address: Address }>();
+  private foundNext = 1;
+
+  searchable(): boolean {
+    return [...this.connectors.values()].some((c) => c.search);
+  }
+
+  /** The search_messages tool: every connector that can search, with the owner's rights. The owner's alone. */
+  async searchMessages(context: ToolContext, query: string, limit: number): Promise<string> {
+    if (!context.scope.owner) return "Not allowed here.";
+    const lines: string[] = [];
+    for (const connector of this.connectors.values()) {
+      if (!connector.search) continue;
+      for (const hit of await connector.search(query, limit)) {
+        const ref = this.foundNext++;
+        this.found.set(ref, { connector: connector.id, address: hit.address });
+        if (this.found.size > 500) this.found.delete(this.found.keys().next().value!);
+        const text = hit.text.replace(/\s+/g, " ");
+        lines.push(`- ${localTime(hit.at)} found:${ref} ${hit.place} ${hit.author}: "${text.length > 500 ? `${text.slice(0, 500)}…` : text}"`);
+      }
+    }
+    return lines.join("\n") || "Nothing found.";
+  }
+
   /** The read_conversation tool: the whole conversation of a message, under the same rule as the digest. */
   async readConversation(context: ToolContext, ref: string): Promise<string> {
+    const hit = /^found:(\d+)$/.exec(ref.trim());
+    if (hit) {
+      const found = context.scope.owner ? this.found.get(Number(hit[1])) : undefined;
+      const connector = found && this.connectors.get(found.connector);
+      if (!found || !connector) return "No such message (found:<n> refs last until a restart).";
+      const thread = await connector.read(found.address);
+      return `${thread.label}\n${thread.messages.map((m) => `[${localTime(m.at)}] ${m.author}: ${m.text}`).join("\n")}`;
+    }
     const id = /^(?:message:)?(\d+)$/.exec(ref.trim());
     const row = id ? this.store.inbox(Number(id[1])) : undefined;
     if (!row || !mayRecall({ private: row.private, author: row.author_id }, context.scope, this.privacy)) return "No such message.";

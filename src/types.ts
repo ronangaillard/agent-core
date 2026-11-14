@@ -50,6 +50,8 @@ export type DeliverResult =
   | { ok: false; transient: boolean; error: string };
 
 export type ThreadMessage = { author: string; text: string; at: string };
+/** A message found by a connector's search: where it is, to read its conversation. */
+export type Found = { at: string; author: string; place: string; text: string; address: Address };
 export type Thread = { label: string; messages: ThreadMessage[] };
 
 /** Who speaks, where: decided by code, never by the model. */
@@ -98,6 +100,8 @@ export interface Connector {
   onDisconnected?(callback: () => void): void;
   /** Raw events since this date (ISO), for the catch-up after a restart or an outage. */
   catchUp?(since: string): AsyncIterable<unknown>;
+  /** Search the whole place (not only where the agent is), with the owner's rights: the owner's tool only. */
+  search?(query: string, limit: number): Promise<Found[]>;
   /** A person (name or id) → the address of a direct message with them, or null. */
   resolve?(person: string): Promise<Address | null>;
   /** The thread_key its rows carry for this address. Default: connector:conversation:thread. */

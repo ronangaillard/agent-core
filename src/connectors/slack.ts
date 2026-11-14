@@ -54,7 +54,10 @@ export function slackConnector(options: {
   const app = new App({ token: options.botToken, receiver, clientOptions: { retryConfig: { retries: 0 }, rejectRateLimitedCalls: true } });
   const client = app.client;
   // Reads may wait out a rate limit and retry (a read twice harms nothing); posts never do.
-  const reader = new webApi.WebClient(options.botToken, { retryConfig: { retries: 5, factor: 2, minTimeout: 1000, maxTimeout: 30_000 } });
+  const retries = { retries: 5, factor: 2, minTimeout: 1000, maxTimeout: 30_000 };
+  const reader = new webApi.WebClient(options.botToken, { retryConfig: retries });
+  // The owner's eyes: search, and reading what search found where the bot is not.
+  const ownerReader = options.userToken ? new webApi.WebClient(options.userToken, { retryConfig: retries }) : undefined;
   const self = { userId: "", botId: "" };
   const member = new Map<string, boolean>();
   const secret = new Map<string, boolean>();
@@ -108,11 +111,11 @@ export function slackConnector(options: {
     }
   }
 
-  async function readThread(address: Address): Promise<Thread> {
+  async function readThread(address: Address, by = reader): Promise<Thread> {
     const page =
       address.thread === "main"
-        ? await reader.conversations.history({ channel: address.conversation, limit: 30, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) })
-        : await reader.conversations.replies({ channel: address.conversation, ts: address.thread, limit: 100, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
+        ? await by.conversations.history({ channel: address.conversation, limit: 30, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) })
+        : await by.conversations.replies({ channel: address.conversation, ts: address.thread, limit: 100, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
     const raw = (page.messages ?? []) as SlackMessage[];
     const ordered = address.thread === "main" ? [...raw].reverse() : raw;
     const messages = await Promise.all(
@@ -234,9 +237,35 @@ export function slackConnector(options: {
       try {
         return await readThread(address);
       } catch (error) {
+        // A conversation the bot is not in (found by search): read with the owner's token.
+        if (ownerReader && leftChannel(error)) return readThread(address, ownerReader).catch((e: unknown) => Promise.reject(readError(e)));
         throw readError(error);
       }
     },
+
+    ...(ownerReader
+      ? {
+          async search(query: string, limit: number) {
+            type Match = { ts?: string; user?: string; username?: string; text?: string; permalink?: string; channel?: { id?: string; name?: string; is_im?: boolean; is_mpim?: boolean } };
+            let page;
+            try {
+              page = await ownerReader.search.messages({ query, count: limit, sort: "timestamp", sort_dir: "desc" });
+            } catch (error) {
+              throw readError(error);
+            }
+            const matches = ((page.messages as { matches?: Match[] } | undefined)?.matches ?? []).filter((m) => m.ts && m.channel?.id);
+            return Promise.all(
+              matches.map(async (m) => {
+                const channel = m.channel!;
+                const rooted = /[?&]thread_ts=([\d.]+)/.exec(m.permalink ?? "")?.[1];
+                const thread = rooted ?? (channel.is_im ? "main" : m.ts!);
+                const place = channel.is_im ? "in a direct message" : channel.is_mpim ? "in a group message" : `in #${channel.name ?? channel.id}`;
+                return { at: isoOf(m.ts!), author: m.username || (await nameOf(m.user)), place, text: m.text ?? "", address: { connector: "slack", conversation: channel.id!, thread, ts: m.ts! } };
+              }),
+            );
+          },
+        }
+      : {}),
 
     form: {
       schema: () =>

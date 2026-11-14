@@ -176,6 +176,24 @@ test("read_conversation: a whole other conversation, under the privacy rule", as
   loose.kill();
 });
 
+test("search_messages: the whole workspace, the owner's alone, and found:<n> reads its conversation", async () => {
+  const world = new World();
+  world.say("the budget is 40k", { thread: "elsewhere", author: "paul", ownerOnly: false });
+  const connector = new FakeConnector(world);
+  const searchable = Object.assign(connector, {
+    search: async (query: string) =>
+      query === "budget" ? [{ at: new Date().toISOString(), author: "paul", place: "in #finance", text: "the budget is 40k", address: { connector: "fake", conversation: "elsewhere", thread: "main" } }] : [],
+  });
+  const core = makeCore(freshDb(), searchable, echoBrain().brain);
+  assert.match(await core.searchMessages(context(colleague), "budget", 5), /Not allowed/);
+  const found = await core.searchMessages(context(owner), "budget", 5);
+  assert.match(found, /found:1 in #finance paul: "the budget is 40k"/);
+  assert.match(await core.readConversation(context(owner), "found:1"), /paul: the budget is 40k/);
+  assert.match(await core.readConversation(context(colleague), "found:1"), /No such message/);
+  assert.equal(await core.searchMessages(context(owner), "nothing", 5), "Nothing found.");
+  core.kill();
+});
+
 test("jobs: run on their schedule, invisible to the tools; a job gone from the code is dropped", async () => {
   const path = freshDb();
   const store = new Store(openDb(path));
