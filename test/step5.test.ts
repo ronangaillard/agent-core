@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { insideCopy, prepareCopy, pushBranch } from "../src/runners/claude-code.ts";
+import { fileUseAllowed, insideCopy, prepareCopy, pushBranch } from "../src/runners/claude-code.ts";
 import type { TaskRun, TaskRunner } from "../src/tasks.ts";
 import type { Brain, Scope, ToolContext } from "../src/types.ts";
 import { echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
@@ -223,4 +223,10 @@ test("runner: file tools stay in the copy and out of its .git, whatever the case
   assert.equal(insideCopy(dir, ".GIT/config"), false);
   assert.equal(insideCopy(dir, "src/sneaky/config"), false);
   assert.equal(insideCopy(dir, "../elsewhere"), false);
+  // A glob pattern is a path too.
+  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "src/**/*.ts" }), true);
+  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "/Users/*/.ssh/*" }), false);
+  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "../../**/*.env", path: "src" }), false);
+  assert.equal(fileUseAllowed(dir, "Grep", { pattern: "..", glob: "**/*.ts" }), true, "Grep's pattern is a regex, not a path");
+  assert.equal(fileUseAllowed(dir, "Grep", { pattern: "token", glob: "../**" }), false);
 });

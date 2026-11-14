@@ -13,9 +13,6 @@ export type EmailOptions = {
   name: string;
   /** Only senders of these domains are read, and only when DMARC passes: nobody passes for a colleague. */
   allowedDomains: string[];
-  /** The owner's addresses, and his id on the other connectors: his mails are known as his, never with his scope. */
-  ownerEmails: string[];
-  ownerId: string;
 };
 
 /** What Resend gives for a received e-mail. */
@@ -110,7 +107,6 @@ export function rejectionOf(email: Received, options: Pick<EmailOptions, "addres
 export function emailConnector(options: EmailOptions): Connector {
   let server: Server | undefined;
   const self = options.address.toLowerCase();
-  const owners = options.ownerEmails.map((address) => address.toLowerCase());
 
   async function resend<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${API}${path}`, {
@@ -193,7 +189,6 @@ export function emailConnector(options: EmailOptions): Connector {
         return null;
       }
       const from = parseAddress(email.from).address;
-      const owner = owners.includes(from);
       const subject = email.subject || "(no subject)";
       // The mail that started the thread, and who writes: References is the sender's to set, so a thread is never
       // shared with someone who only knows its first Message-ID.
@@ -206,9 +201,10 @@ export function emailConnector(options: EmailOptions): Connector {
         address: { connector: "email", conversation: replyTo, thread, ts: email.id },
         thread_key: `email:${thread}`,
         mode_key: "email",
-        author_id: owner ? options.ownerId : from,
+        // The address, even the owner's: DMARC vouches for a domain, not a mailbox. So never his scope, nor his
+        // identity (a task he asked for is not changed by a mail "from" him).
+        author_id: from,
         author_kind: "human",
-        // Never the owner's scope by e-mail: DMARC vouches for a domain, not a mailbox.
         owner_only: false,
         private: true,
         dm: true,

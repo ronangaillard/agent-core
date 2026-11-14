@@ -100,8 +100,6 @@ const options = {
   address: "agent@acme.fr",
   name: "Agent",
   allowedDomains: ["acme.fr"],
-  ownerEmails: ["ronan@acme.fr"],
-  ownerId: "U_RONAN",
 };
 
 const mail = (over: Partial<Received> = {}): Received => ({
@@ -147,7 +145,7 @@ test("e-mail: Svix signature, who is read, a thread per started mail and sender,
   assert.equal((await connector.toInbox(mail({ reply_to: ["drop@evil.com"] })))!.address.conversation, "paul@acme.fr");
   assert.match(rejectionOf(mail({ from: "x@acme.fr@evil.com" }), options)!, /domains/);
   const alone = (await connector.toInbox(mail({ from: "ronan@acme.fr", text: "send 12" })))!;
-  assert.equal(alone.author_id, "U_RONAN");
+  assert.equal(alone.author_id, "ronan@acme.fr", "the owner's address is not his identity");
   // DMARC vouches for a domain, not a mailbox: no owner scope, no command by e-mail.
   assert.equal(alone.owner_only, false);
   assert.equal(alone.text, undefined);

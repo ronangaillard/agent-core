@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createSdkMcpServer, query, tool, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -138,6 +138,14 @@ export function insideCopy(dir: string, path: string): boolean {
   return !relative(root, target).split(sep).some((part) => part.toLowerCase() === ".git");
 }
 
+/** A file tool's use: its path inside the copy, and its glob (Glob's pattern, Grep's glob) relative, never climbing
+ * out or into .git: a pattern is a path too. */
+export function fileUseAllowed(dir: string, name: string, input: Record<string, unknown>): boolean {
+  const patterns = [name === "Glob" ? input.pattern : undefined, input.glob].filter((p): p is string => typeof p === "string");
+  const safe = (p: string) => !isAbsolute(p) && !p.startsWith("~") && !p.split(/[\\/]/).some((part) => part === ".." || part.toLowerCase() === ".git");
+  return patterns.every(safe) && insideCopy(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."));
+}
+
 const resultSchema = z.object({ report: z.string().describe("Your report, short, in your voice: what you did, the PR link, what is left or to check") });
 
 /**
@@ -198,7 +206,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const canUseTool: CanUseTool = async (name, input) => {
       if (name.startsWith(`mcp__${SERVER}__`)) return { behavior: "allow", updatedInput: input };
       if (FILE_TOOLS.has(name)) {
-        if (insideCopy(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."))) return { behavior: "allow", updatedInput: input };
+        if (fileUseAllowed(dir, name, input)) return { behavior: "allow", updatedInput: input };
       }
       return { behavior: "deny", message: `${name} is not allowed in a code task: do without, or say what you are missing in your report.` };
     };

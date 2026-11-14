@@ -4,6 +4,13 @@ import { TransientError, type Address, type Connector, type DeliverResult, type 
 
 const { App, SocketModeReceiver, webApi } = bolt;
 
+/** Slack saying the bot is not, or no longer, in this channel. */
+const LEFT = new Set(["not_in_channel", "channel_not_found", "is_archived"]);
+export const leftChannel = (error: unknown) => {
+  const e = error as { code?: string; data?: { error?: string } };
+  return e.code === "slack_webapi_platform_error" && LEFT.has(e.data?.error ?? "");
+};
+
 /** A read that failed for a reason that passes (rate limit, 5xx, network): the core waits and retries. */
 function readError(error: unknown): unknown {
   const e = error as { code?: string; statusCode?: number; message?: string };
@@ -152,8 +159,8 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
       for (const [channel, isIn] of [...member]) {
         if (!isIn) continue;
         const type = channel.startsWith("D") ? "im" : undefined;
-        // Every page. A passing error stops the pass, which the core tries again from the same cursor; Slack saying no
-        // for this channel (removed while away, archived) skips it, and it is no longer counted as joined.
+        // Every page. An error stops the pass, which the core tries again from the same cursor; only Slack saying the
+        // bot is not in this channel (removed while away, archived) skips it, and it is no longer counted as joined.
         let cursor: string | undefined;
         try {
           do {
@@ -172,9 +179,13 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
             cursor = page.response_metadata?.next_cursor || undefined;
           } while (cursor);
         } catch (error) {
-          const read = readError(error);
-          if (read instanceof TransientError) throw read;
-          console.error(`slack: catch-up skips ${channel}`, error);
+          // Only "not in this channel" skips it; any other error (Slack's own failures included) fails the pass,
+          // which the core tries again.
+          if (!leftChannel(error)) {
+            const read = readError(error);
+            throw read instanceof TransientError ? read : new TransientError(error instanceof Error ? error.message : String(error));
+          }
+          console.error(`slack: catch-up skips ${channel}, the bot is not in it`, error);
           member.set(channel, false);
         }
       }

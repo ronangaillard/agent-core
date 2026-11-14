@@ -46,8 +46,6 @@ const email =
         address: process.env.AGENT_EMAIL,
         name: process.env.AGENT_NAME ?? "Agent",
         allowedDomains: (process.env.EMAIL_ALLOWED_DOMAINS ?? "").split(",").map((d) => d.trim().toLowerCase()).filter(Boolean),
-        ownerEmails: (process.env.OWNER_EMAILS ?? "").split(",").map((a) => a.trim()).filter(Boolean),
-        ownerId,
       })
     : undefined;
 

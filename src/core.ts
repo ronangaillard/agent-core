@@ -227,6 +227,9 @@ export class Core {
   /** A catch-up is owed: run now, or once more after the pass running ends (it may have read past what was missed). */
   private owe(connector: Connector) {
     if (!connector.catchUp) return;
+    // A new debt starts a new series of tries once the last one is over (passed, or given up after five): an old
+    // outage's failures do not cut this one short. A series still retrying keeps its count.
+    if (!this.catchingNow.has(connector.id)) this.store.catchUpReset(connector.id);
     this.catching.add(connector.id);
     if (this.catchingNow.has(connector.id)) this.catchAgain.add(connector.id);
     else void this.catchUp(connector);

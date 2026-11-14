@@ -61,7 +61,7 @@ Code tasks (off unless both are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separ
 `bubblewrap`): it writes only in the task's copy and reaches only package registries.
 
 E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
-`AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS` and `OWNER_EMAILS`
+`AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS`
 (comma-separated). The Resend webhook takes the `email.received` event.
 
 Do not run it on the same Slack app as another agent: both would answer.
@@ -107,9 +107,9 @@ Step 4, done:
   with no acting tools, held; once he sends it, it is posted with his Slack token and never counts as the agent's.
 - The e-mail connector: a Svix-signed webhook, a catch-up through the API, only allowed domains with DMARC passing
   (a Reply-To outside them is not followed), a thread per started mail and sender (the first Message-ID of
-  References, which the sender sets, plus who writes: never the subject),
-  the owner's scope only when he writes alone with the agent, replies in the e-mail thread (In-Reply-To,
-  References), a form where the agent says whether it is sure.
+  References, which the sender sets, plus who writes: never the subject), the sender's address as author (never
+  the owner's scope or identity, even from his address), replies in the e-mail thread (In-Reply-To, References), a
+  form where the agent says whether it is sure.
 - Polls need no code of their own: `send` to people, and a destination for the owner.
 
 Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
@@ -143,4 +143,6 @@ to a task that reports elsewhere; a draft gets no tool with an effect (`effect` 
 
 Known limits: a permission the session lacks is refused, not asked to the owner; a merged PR leaves its task
 `waiting`; the owner's own DMs with colleagues (his user token's events) are not read; an e-mail's `read()` gives the
-e-mail itself (its quoted history included); a Slack blip shorter than `catchUpAfterMs` is not caught up.
+e-mail itself (its quoted history included); an e-mail thread with several people is one conversation per sender,
+so two of them answering at once can each get a reply; a Slack blip shorter than `catchUpAfterMs` is not caught up;
+one live event not read for a passing reason costs a full catch-up pass.

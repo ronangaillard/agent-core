@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { leftChannel } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
 import { digest } from "../src/history.ts";
 import { ownerCommands } from "../src/owner.ts";
@@ -182,5 +183,35 @@ test("a job that ingests does not make another job run twice", async () => {
   await core.start();
   await sleep(30);
   assert.equal(runsOfB, 1);
+  core.kill();
+});
+
+test("slack: only 'not in this channel' marks a channel left; Slack's own failures fail the pass", () => {
+  const platform = (error: string) => ({ code: "slack_webapi_platform_error", data: { error } });
+  assert.equal(leftChannel(platform("not_in_channel")), true);
+  assert.equal(leftChannel(platform("channel_not_found")), true);
+  assert.equal(leftChannel(platform("is_archived")), true);
+  assert.equal(leftChannel(platform("internal_error")), false);
+  assert.equal(leftChannel(platform("service_unavailable")), false);
+  assert.equal(leftChannel({ code: "slack_webapi_rate_limited_error" }), false);
+});
+
+test("catch-up: after a series given up, a new debt gets its five tries again", async () => {
+  const world = new World();
+  const path = freshDb();
+  new Store(openDb(path)).setCursor("fake", new Date(Date.now() - 3600_000).toISOString());
+  const connector = new FakeConnector(world);
+  connector.failingCatchUps = 5;
+  const core = makeCore(path, connector, echoBrain().brain, { backoffMs: [10], catchUpAfterMs: 5 });
+  await core.start();
+  await waitFor(() => connector.catchUps.length === 5);
+  await sleep(40);
+  // A later outage: one failure, then the service is fine again.
+  connector.failingCatchUps = 1;
+  connector.drop();
+  await sleep(15);
+  connector.reconnect();
+  await waitFor(() => connector.catchUps.length === 7);
+  assert.equal(core.store.catchUpFailures("fake"), 0);
   core.kill();
 });

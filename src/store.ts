@@ -590,6 +590,11 @@ export class Store {
     });
   }
 
+  /** A new series of tries, unless one is still waiting for its retry. */
+  catchUpReset(connector: string) {
+    this.db.prepare("UPDATE cursors SET failures = 0 WHERE connector = ? AND retry_at IS NULL").run(connector);
+  }
+
   catchUpFailures(connector: string): number {
     const row = this.db.prepare("SELECT failures FROM cursors WHERE connector = ?").get(connector) as Row | undefined;
     return row ? Number(row.failures) : 0;
