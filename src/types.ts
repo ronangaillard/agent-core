@@ -11,6 +11,9 @@ export type Address = {
   ts?: string;
 };
 
+/** The thread an address is in: without its message. The one thing the core does with an Address. */
+export const threadOf = ({ ts: _, ...address }: Address): Address => address;
+
 export type AuthorKind = "human" | "bot" | "system";
 
 /** What a connector (or a source) hands to the core. The core never reads the payload. */
@@ -90,8 +93,11 @@ export type Mode = "mention" | "mention-sticky" | "triage";
 /** Who may use a tool: every conversation, or the owner's private one. Decided by code, never by the model. */
 export type Rule = "all" | "owner";
 
-/** Where the tool is called from: the rights, the conversation, the lot being answered. */
-export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[]; connector: string; address: Address };
+/**
+ * Where the tool is called from: the rights, the conversation, the lot being answered. sent: the sends of this run,
+ * per place (the n-th send to a place in a lot has its own key, the same in a re-run).
+ */
+export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[]; connector: string; address: Address; sent?: Map<string, number> };
 
 export type ToolDef = {
   name: string;

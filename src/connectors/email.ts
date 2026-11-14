@@ -13,7 +13,7 @@ export type EmailOptions = {
   name: string;
   /** Only senders of these domains are read, and only when DMARC passes: nobody passes for a colleague. */
   allowedDomains: string[];
-  /** The owner's addresses, and his id on the other connectors (his scope is the same everywhere). */
+  /** The owner's addresses, and his id on the other connectors: his mails are known as his, never with his scope. */
   ownerEmails: string[];
   ownerId: string;
 };
@@ -46,9 +46,9 @@ export function parseAddress(value: string) {
 const domainOf = (address: string) => address.slice(address.lastIndexOf("@") + 1);
 
 /**
- * The thread: the first Message-ID of References (the mail that started it), else In-Reply-To, else this mail's own.
- * Two people writing with the same subject are two conversations; the agent's replies keep References, so an answer
- * to it stays in the thread.
+ * The mail that started the thread: the first Message-ID of References, else In-Reply-To, else this mail's own. Two
+ * people writing with the same subject are two conversations; the agent's replies keep References, so an answer to it
+ * stays in the thread.
  */
 export function threadRoot(email: Received): string {
   const references = header(email, "references")?.match(/<[^>]+>/g);
@@ -194,10 +194,10 @@ export function emailConnector(options: EmailOptions): Connector {
       }
       const from = parseAddress(email.from).address;
       const owner = owners.includes(from);
-      // Only the owner and the agent on it: his private conversation. Anyone else in copy, and it is not.
-      const others = [...(email.to ?? []), ...(email.cc ?? [])].map((a) => parseAddress(a).address).filter((a) => a && a !== self && !owners.includes(a));
       const subject = email.subject || "(no subject)";
-      const thread = threadRoot(email);
+      // The mail that started the thread, and who writes: References is the sender's to set, so a thread is never
+      // shared with someone who only knows its first Message-ID.
+      const thread = `${threadRoot(email)} ${from}`;
       // A Reply-To outside the allowed domains is not followed: the reply goes to the sender.
       const asked = email.reply_to?.[0] ? parseAddress(email.reply_to[0]).address : "";
       const replyTo = asked && options.allowedDomains.includes(domainOf(asked)) ? asked : from;
@@ -208,7 +208,8 @@ export function emailConnector(options: EmailOptions): Connector {
         mode_key: "email",
         author_id: owner ? options.ownerId : from,
         author_kind: "human",
-        owner_only: owner && others.length === 0,
+        // Never the owner's scope by e-mail: DMARC vouches for a domain, not a mailbox.
+        owner_only: false,
         private: true,
         dm: true,
         mentions_agent: true,

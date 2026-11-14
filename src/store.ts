@@ -290,7 +290,7 @@ export class Store {
   }
 
   /** A change of the task, its event with it; a report to its conversation too, when there is one. */
-  updateTask(id: number, fields: Partial<Pick<TaskRecord, "status" | "pr" | "request" | "requester" | "owner_asked" | "resumes">>, report?: string) {
+  updateTask(id: number, fields: Partial<Pick<TaskRecord, "status" | "pr" | "request" | "requester" | "owner_asked" | "resumes">>, report?: string, alert?: string) {
     tx(this.db, () => {
       const task = this.task(id);
       if (!task) return;
@@ -300,6 +300,7 @@ export class Store {
         this.db.prepare(`UPDATE tasks SET ${columns.map((c) => `${c} = ?`).join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), id);
       }
       if (fields.status) this.event({ kind: `task_${fields.status}`, thread_key: task.thread_key, private: task.private, ref: id });
+      this.insertAlert(alert);
       if (report) {
         this.db
           .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
@@ -354,14 +355,17 @@ export class Store {
    * One transaction: the system row in the inbox (its source_id makes a second firing a no-op) and the reminder
    * re-armed or deleted. A crash in between can neither lose nor double it.
    */
-  fire(reminder: ReminderRecord, next: string | null, row: InboxRow | null): void {
-    tx(this.db, () => {
+  fire(reminder: ReminderRecord, next: string | null, row: InboxRow | null): boolean {
+    return tx(this.db, () => {
+      // Fired already (another pass, a re-entry): nothing.
+      if (!this.db.prepare("SELECT 1 FROM reminders WHERE id = ? AND due_at = ?").get(reminder.id, reminder.due_at)) return false;
       if (row && reminder.connector) {
         const id = this.insertInbox(row, reminder.connector);
         if (id !== null) this.event({ kind: "reminder_due", thread_key: row.thread_key, private: row.private, ref: id, payload: { reminder: reminder.id } });
       }
       if (next) this.db.prepare("UPDATE reminders SET due_at = ? WHERE id = ?").run(next, reminder.id);
       else this.db.prepare("DELETE FROM reminders WHERE id = ?").run(reminder.id);
+      return true;
     });
   }
 
@@ -475,7 +479,7 @@ export class Store {
     posts: Post[],
     held: boolean,
     readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean; held?: boolean },
-    options: { outcome?: string; notice?: { address: Address; text: string } } = {},
+    options: { outcome?: string; notice?: { address: Address; threadKey: string; text: string } } = {},
   ) {
     const last = lot[lot.length - 1]!;
     const replied = posts.length > 0;
@@ -494,10 +498,10 @@ export class Store {
       this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(options.outcome ?? (replied ? "replied" : "silent"), now(), ...ids);
       // What waits for the owner is announced to him in the same transaction: never a held post he does not know of.
       if (replied && held && options.notice) {
-        const { address, text } = options.notice;
+        const { address, threadKey, text } = options.notice;
         this.db
           .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
-          .run(`${address.connector}:${address.conversation}:${address.thread}`, address.connector, JSON.stringify(address), JSON.stringify({ text }), now());
+          .run(threadKey, address.connector, JSON.stringify(address), JSON.stringify({ text }), now());
       }
       this.event({ kind: replied ? "drafted" : "silent", thread_key: last.thread_key, author_id: last.author_id, author_kind: last.author_kind, private: lot.some((r) => r.private), ref: lot[0]!.id, payload: readable });
     });
@@ -568,6 +572,32 @@ export class Store {
   /** Only forward. */
   setCursor(connector: string, at: string) {
     this.db.prepare("INSERT INTO cursors (connector, at) VALUES (?, ?) ON CONFLICT(connector) DO UPDATE SET at = MAX(at, excluded.at)").run(connector, at);
+  }
+
+  /** A catch-up pass completed: the cursor moves, the failures are forgotten. */
+  catchUpDone(connector: string, at: string) {
+    this.setCursor(connector, at);
+    this.db.prepare("UPDATE cursors SET failures = 0, retry_at = NULL WHERE connector = ?").run(connector);
+  }
+
+  /** A pass failed: tried again at this date (on the one timer), or not at all past the cap, with an alert. */
+  catchUpFailed(connector: string, retryAt: string | null, alert?: string): number {
+    return tx(this.db, () => {
+      this.db.prepare("INSERT INTO cursors (connector, at) VALUES (?, ?) ON CONFLICT(connector) DO NOTHING").run(connector, now());
+      this.db.prepare("UPDATE cursors SET failures = failures + 1, retry_at = ? WHERE connector = ?").run(retryAt, connector);
+      this.insertAlert(alert);
+      return Number((this.db.prepare("SELECT failures FROM cursors WHERE connector = ?").get(connector) as Row).failures);
+    });
+  }
+
+  catchUpFailures(connector: string): number {
+    const row = this.db.prepare("SELECT failures FROM cursors WHERE connector = ?").get(connector) as Row | undefined;
+    return row ? Number(row.failures) : 0;
+  }
+
+  /** The connectors whose failed catch-up is due again. */
+  catchUpsDue(): string[] {
+    return (this.db.prepare("SELECT connector FROM cursors WHERE retry_at IS NOT NULL AND retry_at <= ?").all(now()) as Row[]).map((r) => String(r.connector));
   }
 
   lastSourceAt(connector: string): string | undefined {
@@ -676,9 +706,11 @@ export class Store {
            UNION ALL
            SELECT next_attempt_at AS at FROM outbox WHERE status = 'pending' AND next_attempt_at > ?
            UNION ALL
-           SELECT due_at AS at FROM reminders WHERE due_at > ?)`,
+           SELECT due_at AS at FROM reminders WHERE due_at > ?
+           UNION ALL
+           SELECT retry_at AS at FROM cursors WHERE retry_at > ?)`,
       )
-      .get(at, at, at) as Row | undefined;
+      .get(at, at, at, at) as Row | undefined;
     return row?.at === null || row?.at === undefined ? undefined : String(row.at);
   }
 }

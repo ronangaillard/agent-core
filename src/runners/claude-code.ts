@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createSdkMcpServer, query, tool, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -40,14 +40,21 @@ const SAFE = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-
 const UPLOAD_PACK = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false upload-pack";
 
 /**
- * git run by this process: a scrubbed environment (none of the agent's secrets), and the token, when needed, in a
- * header of this one command. Never run in the copy: the session writes there, its config and hooks are not trusted.
+ * git run by this process: a scrubbed environment (none of the agent's secrets), and the token, when needed, as a
+ * header given through this one command's environment (not its arguments, which any process can list). Never run in
+ * the copy: the session writes there, its config and hooks are not trusted.
  */
 function git(args: string[], options: { cwd?: string; token?: string } = {}) {
-  const auth = options.token ? ["-c", `http.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`] : [];
   const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" };
   for (const key of ["PATH", "HOME", "LANG"]) if (process.env[key]) env[key] = process.env[key]!;
-  return exec("git", [...SAFE, ...auth, ...args], { cwd: options.cwd, env, maxBuffer: 10_000_000 }).then((r) => r.stdout.trim());
+  if (options.token) {
+    Object.assign(env, {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraheader",
+      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`,
+    });
+  }
+  return exec("git", [...SAFE, ...args], { cwd: options.cwd, env, maxBuffer: 10_000_000 }).then((r) => r.stdout.trim());
 }
 
 /** The copy's branch, brought into the vault: a fetch from the copy, which runs no code of the copy's. */
@@ -57,9 +64,10 @@ async function syncFromCopy(vault: string, dir: string, branch: string) {
 
 /**
  * The task's copy, cloned once from the vault (a bare repository this process owns, fed from the remote), on its
- * branch, kept for the next runs. The copy holds no token and no link to the remote. Returns the branch's last commits.
+ * branch, kept for the next runs. The copy holds no token and no link to the remote. Returns the branch's last
+ * commits, and when someone else pushed to the branch, a bundle of the remote branch for the session to merge.
  */
-export async function prepareCopy(dir: string, vault: string, remote: string, branch: string, token: string) {
+export async function prepareCopy(dir: string, vault: string, remote: string, branch: string, token: string): Promise<{ log: string; upstream?: string }> {
   if (!existsSync(join(vault, "HEAD"))) {
     rmSync(vault, { recursive: true, force: true });
     mkdirSync(vault, { recursive: true });
@@ -77,7 +85,23 @@ export async function prepareCopy(dir: string, vault: string, remote: string, br
   } else {
     await syncFromCopy(vault, dir, branch).catch(() => undefined);
   }
-  return git(["log", "--oneline", "-5", `refs/heads/${branch}`], { cwd: vault }).catch(() => "");
+  const log = await git(["log", "--oneline", "-5", `refs/heads/${branch}`], { cwd: vault }).catch(() => "");
+  // The remote branch moved (a suggestion committed on the PR): its commits, as a file the session can fetch.
+  const upstream = `refs/upstream/${branch}`;
+  const fetched = await git(["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${upstream}`], { cwd: vault, token }).then(
+    () => true,
+    () => false,
+  );
+  if (!fetched) return { log };
+  const behind = await git(["merge-base", "--is-ancestor", upstream, `refs/heads/${branch}`], { cwd: vault }).then(
+    () => false,
+    () => true,
+  );
+  if (!behind) return { log };
+  const bundle = `${vault}.upstream.bundle`;
+  rmSync(bundle, { force: true });
+  await git(["bundle", "create", "--quiet", bundle, upstream], { cwd: vault });
+  return { log, upstream: bundle };
 }
 
 /** Only the task's branch, from the vault, to the remote named here: nothing in the copy decides where it goes. */
@@ -96,6 +120,22 @@ function cleanEnvironment(name: string): Record<string, string> {
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) Object.assign(env, { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
   if (process.env.ANTHROPIC_API_KEY) Object.assign(env, { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
   return env;
+}
+
+/** Inside the copy, symlinks followed, never in its .git (whatever the case: macOS does not care). */
+export function insideCopy(dir: string, path: string): boolean {
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      const parent = dirname(p);
+      return parent === p ? p : join(real(parent), basename(p));
+    }
+  };
+  const root = real(dir);
+  const target = real(resolve(dir, path));
+  if (target !== root && !target.startsWith(root + sep)) return false;
+  return !relative(root, target).split(sep).some((part) => part.toLowerCase() === ".git");
 }
 
 const resultSchema = z.object({ report: z.string().describe("Your report, short, in your voice: what you did, the PR link, what is left or to check") });
@@ -125,7 +165,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const dir = join(workspace, `task-${task.id}`);
     const vault = join(vaults, `task-${task.id}.git`);
     const remote = `${base}/${task.repo}.git`;
-    const log = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
+    const { log, upstream } = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
     let pr = task.pr;
 
     const server = createSdkMcpServer({
@@ -158,9 +198,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const canUseTool: CanUseTool = async (name, input) => {
       if (name.startsWith(`mcp__${SERVER}__`)) return { behavior: "allow", updatedInput: input };
       if (FILE_TOOLS.has(name)) {
-        const path = resolve(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."));
-        const inside = path === dir || path.startsWith(dir + sep);
-        if (inside && !relative(dir, path).split(sep).includes(".git")) return { behavior: "allow", updatedInput: input };
+        if (insideCopy(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."))) return { behavior: "allow", updatedInput: input };
       }
       return { behavior: "deny", message: `${name} is not allowed in a code task: do without, or say what you are missing in your report.` };
     };
@@ -177,6 +215,9 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           `Request (task #${task.id}, "${task.title}", ${task.repo}):\n<request>\n${run.request}\n</request>`,
           `The conversation it comes from:\n<conversation>\n${run.conversation || "(none)"}\n</conversation>`,
           `The copy (${dir}), on branch ${task.branch}${pr ? `, PR #${pr} open` : ""}, last commits:\n<git>\n${log || "(none yet)"}\n</git>`,
+          upstream
+            ? `Someone pushed to ${task.branch} on the remote: your copy lacks those commits and a push would be refused. First: git fetch ${upstream} refs/upstream/${task.branch} && git merge FETCH_HEAD (resolve conflicts if any).`
+            : "",
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -201,7 +242,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
               allowWrite: [dir],
               denyWrite: [join(dir, ".git", "config"), join(dir, ".git", "hooks")],
               denyRead: [homedir(), process.cwd(), vaults, ...(options.denyRead ?? [])],
-              allowRead: [dir],
+              allowRead: [dir, ...(upstream ? [upstream] : [])],
             },
           },
           settingSources: [],

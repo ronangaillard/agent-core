@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { prepareCopy, pushBranch } from "../src/runners/claude-code.ts";
+import { insideCopy, prepareCopy, pushBranch } from "../src/runners/claude-code.ts";
 import type { TaskRun, TaskRunner } from "../src/tasks.ts";
 import type { Brain, Scope, ToolContext } from "../src/types.ts";
 import { echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
@@ -191,4 +191,36 @@ test("runner: the copy is cloned on the task's branch; only that branch is pushe
   const again = join(root, "task-1-again");
   await prepareCopy(again, join(root, "vault", "again.git"), bare, "agent/1-x", "token");
   assert.match(run(again, "log", "--oneline", "-1"), /feature/);
+
+  // Someone commits on the PR branch: the next run hands the session a bundle to merge, and the push goes through.
+  const reviewer = join(root, "reviewer");
+  run(root, "clone", "--quiet", "--branch", "agent/1-x", bare, reviewer);
+  writeFileSync(join(reviewer, "suggestion.txt"), "y\n");
+  run(reviewer, "add", ".");
+  run(reviewer, "commit", "--quiet", "-m", "suggestion");
+  run(reviewer, "push", "--quiet", "origin", "agent/1-x");
+  const { upstream } = await prepareCopy(copy, vault, bare, "agent/1-x", "token");
+  assert.ok(upstream && existsSync(upstream));
+  run(copy, "remote", "set-url", "origin", vault);
+  run(copy, "fetch", "--quiet", upstream, "refs/upstream/agent/1-x");
+  run(copy, "merge", "--quiet", "--no-edit", "FETCH_HEAD");
+  writeFileSync(join(copy, "more.txt"), "z\n");
+  run(copy, "add", ".");
+  run(copy, "commit", "--quiet", "-m", "more");
+  await pushBranch(copy, vault, bare, "agent/1-x", "token");
+  assert.match(run(bare, "log", "--oneline", "agent/1-x"), /suggestion/);
+  assert.equal((await prepareCopy(copy, vault, bare, "agent/1-x", "token")).upstream, undefined);
+});
+
+test("runner: file tools stay in the copy and out of its .git, whatever the case or a symlink", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agent-copy-"));
+  mkdirSync(join(dir, ".git"));
+  mkdirSync(join(dir, "src"));
+  symlinkSync(join(dir, ".git"), join(dir, "src", "sneaky"));
+  assert.equal(insideCopy(dir, "src/index.ts"), true);
+  assert.equal(insideCopy(dir, "new/file.ts"), true);
+  assert.equal(insideCopy(dir, ".git/config"), false);
+  assert.equal(insideCopy(dir, ".GIT/config"), false);
+  assert.equal(insideCopy(dir, "src/sneaky/config"), false);
+  assert.equal(insideCopy(dir, "../elsewhere"), false);
 });

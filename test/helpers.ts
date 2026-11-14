@@ -68,6 +68,8 @@ export class FakeConnector implements Connector {
   /** The core's sink, to push live events; and how many catch-ups fail before one works. */
   sink: ((raw: unknown) => void) | undefined;
   failingCatchUps = 0;
+  /** A catch-up that takes this long before yielding (a pass running while things happen). */
+  catchUpDelayMs = 0;
   async start(sink: (raw: unknown) => void) {
     this.sink = sink;
   }
@@ -85,6 +87,7 @@ export class FakeConnector implements Connector {
   }
   async *catchUp(since: string) {
     this.catchUps.push(since);
+    if (this.catchUpDelayMs) await new Promise((resolve) => setTimeout(resolve, this.catchUpDelayMs));
     if (this.failingCatchUps > 0) {
       this.failingCatchUps--;
       throw new Error("ratelimited");

@@ -9,7 +9,8 @@ type Exchange = ReturnType<Store["exchanges"]>[number];
  * again what he said in private himself (never the private conversations of others with the agent).
  */
 function visible(exchange: Exchange, scope: Scope, ownerId: string): boolean {
-  // What waits for the owner (a draft in his name, a held reply) is his alone, approved or not.
+  // What waits for the owner (a draft in his name, a held reply) is his alone, approved or not; he sees all of it,
+  // private or not, as he was told of each one when it was held.
   if (exchange.payload.for_owner || exchange.payload.held) return scope.owner;
   if (!exchange.private) return true;
   return scope.owner && exchange.author_id === ownerId;

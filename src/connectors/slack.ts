@@ -71,7 +71,10 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
       const info = await reader.conversations.info({ channel });
       if (info.channel) remember(info.channel);
       return member.get(channel) ?? false;
-    } catch {
+    } catch (error) {
+      // Not known for a reason that passes: the event is not dropped silently, the core owes a catch-up.
+      const read = readError(error);
+      if (read instanceof TransientError) throw read;
       return false;
     }
   }
@@ -146,26 +149,34 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
      */
     async *catchUp(since) {
       const oldest = (Date.parse(since) / 1000).toFixed(6);
-      for (const [channel, isIn] of member) {
+      for (const [channel, isIn] of [...member]) {
         if (!isIn) continue;
         const type = channel.startsWith("D") ? "im" : undefined;
-        // Every page; an error stops the pass, which the core tries again from the same cursor.
+        // Every page. A passing error stops the pass, which the core tries again from the same cursor; Slack saying no
+        // for this channel (removed while away, archived) skips it, and it is no longer counted as joined.
         let cursor: string | undefined;
-        do {
-          const page = await reader.conversations.history({ channel, oldest, limit: 200, ...(cursor ? { cursor } : {}) });
-          for (const message of (page.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
-            yield { ...message, channel, channel_type: type };
-            if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
-              let next: string | undefined;
-              do {
-                const replies = await reader.conversations.replies({ channel, ts: message.ts, oldest, limit: 200, ...(next ? { cursor: next } : {}) });
-                for (const reply of (replies.messages ?? []) as SlackMessage[]) if (reply.ts !== message.ts) yield { ...reply, channel, channel_type: type };
-                next = replies.response_metadata?.next_cursor || undefined;
-              } while (next);
+        try {
+          do {
+            const page = await reader.conversations.history({ channel, oldest, limit: 200, ...(cursor ? { cursor } : {}) });
+            for (const message of (page.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
+              yield { ...message, channel, channel_type: type };
+              if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
+                let next: string | undefined;
+                do {
+                  const replies = await reader.conversations.replies({ channel, ts: message.ts, oldest, limit: 200, ...(next ? { cursor: next } : {}) });
+                  for (const reply of (replies.messages ?? []) as SlackMessage[]) if (reply.ts !== message.ts) yield { ...reply, channel, channel_type: type };
+                  next = replies.response_metadata?.next_cursor || undefined;
+                } while (next);
+              }
             }
-          }
-          cursor = page.response_metadata?.next_cursor || undefined;
-        } while (cursor);
+            cursor = page.response_metadata?.next_cursor || undefined;
+          } while (cursor);
+        } catch (error) {
+          const read = readError(error);
+          if (read instanceof TransientError) throw read;
+          console.error(`slack: catch-up skips ${channel}`, error);
+          member.set(channel, false);
+        }
       }
     },
 

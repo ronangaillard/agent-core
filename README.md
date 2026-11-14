@@ -101,13 +101,13 @@ Step 4, done:
   leaves alone and never locks its thread; a newer one in the thread replaces it. The owner is told in the same
   transaction, in his DM, with the draft, the form's note and how to act on it.
 - The owner's commands, matched by code on the rows of his private conversation before anything else (outcome
-  `intercepted`, no model call): list, send as is or edited, drop. Slack only: an e-mail carries no command (DMARC
-  vouches for a domain, not a mailbox).
+  `intercepted`, no model call): list, send as is or edited, drop. Slack only: an e-mail never gets the owner's
+  scope nor a command (DMARC vouches for a domain, not a mailbox).
 - Drafts in the owner's name: a human mentions him where the agent would not speak → the agent writes his reply,
   with no acting tools, held; once he sends it, it is posted with his Slack token and never counts as the agent's.
 - The e-mail connector: a Svix-signed webhook, a catch-up through the API, only allowed domains with DMARC passing
-  (a Reply-To outside them is not followed), a thread per started mail (the first Message-ID of References, not the
-  subject),
+  (a Reply-To outside them is not followed), a thread per started mail and sender (the first Message-ID of
+  References, which the sender sets, plus who writes: never the subject),
   the owner's scope only when he writes alone with the agent, replies in the e-mail thread (In-Reply-To,
   References), a form where the agent says whether it is sure.
 - Polls need no code of their own: `send` to people, and a destination for the owner.
@@ -126,12 +126,17 @@ Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
 - The Claude Code runner: the token stays in this process, in a vault (a bare repository per task, outside the
   workspace, which the session can neither read nor write). The copy is cloned from the vault and never trusted:
   pushing fetches the task's branch from the copy into the vault (no hook, no fsmonitor) and pushes from there to the
-  remote named by code. The session gets file tools inside its copy except `.git`, a sandboxed terminal that cannot
-  read the agent's folder or home, and `progress`, `push_branch`, `open_pr`; everything else is refused.
+  remote named by code; the token goes through that command's environment, never its arguments. Commits someone else
+  pushed to the branch reach the session as a bundle to merge. The session gets file tools inside its copy except
+  `.git` (any case, symlinks followed), a sandboxed terminal that cannot read the agent's folder or home, and
+  `progress`, `push_branch`, `open_pr`; everything else is refused.
 
-After a review: the catch-up cursor is stored and moves only when a pass completes (a failed pass is tried again
-after a backoff, every page is read); a failure before a lot is fixed waits a backoff and counts, it never spins;
-`send` is once per place per lot, even reworded; a draft in the owner's name or a held reply shows only to the owner;
+After two reviews: the catch-up cursor is stored and moves only when a pass completes; a reconnection during a pass
+runs another one after it; a failed pass is tried again on the one timer, five times at most, then an alert; a
+channel Slack refuses is skipped; a live event not read for a passing reason owes a pass. A failure before a lot is
+fixed waits a backoff and counts against the row that failed, it never spins. `send` keys the n-th send to a place
+in a lot, so a re-run, even reworded, sends nothing twice; a SIGTERM waits for sends in flight too. A job that
+ingests cannot make another one run twice. a draft in the owner's name or a held reply shows only to the owner;
 a task is changed by its requester, the owner or in its own conversation, and a private conversation is not handed
 to a task that reports elsewhere; a draft gets no tool with an effect (`effect` on `ToolDef`); search results carry
 `message:<id>` for `send`.
