@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,6 +9,7 @@ import { debugServer } from "../src/debug.ts";
 import { digest } from "../src/history.ts";
 import { Memory } from "../src/memory.ts";
 import { ownerCommands } from "../src/owner.ts";
+import { Prompts } from "../src/prompts.ts";
 import { Store } from "../src/store.ts";
 import { TransientError, type Address, type Brain, type DeliverResult, type Post, type Scope } from "../src/types.ts";
 import { echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
@@ -274,5 +275,61 @@ test("debug view: password required, read-only, tables listed, rows filtered and
   assert.equal((await fetch(`${base}/t/sqlite_master`, { headers: auth })).status, 404);
   assert.equal((await fetch(`${base}/t/inbox%3B%20DROP%20TABLE%20inbox`, { headers: auth })).status, 404);
   assert.equal(store.inbox(1)?.source_id, "x:1");
+  await debug.stop();
+});
+
+test("prompts: files written with their defaults, read at every use, edits apply at the next message", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "prompts-"));
+  const prompts = new Prompts(dir);
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const systems: string[] = [];
+  const brain: Brain = async ({ system }) => {
+    systems.push(system ?? "");
+    return { messages: ["ok"] };
+  };
+  const core = makeCore(freshDb(), connector, brain, {}, { prompts });
+  await core.start();
+  // The defaults, as files: the core's, the connector's, the persona from the config.
+  for (const name of ["safety", "gate", "ask-new", "fake", "persona"]) assert.ok(existsSync(join(dir, `${name}.md`)), name);
+  core.ingest(world.say("hello"), "fake");
+  await waitFor(() => systems.length === 1);
+  assert.match(systems[0]!, /Answer\./);
+  writeFileSync(join(dir, "fake.md"), "Answer like a pirate.");
+  writeFileSync(join(dir, "persona.md"), "You are Steve.");
+  core.ingest(world.say("again"), "fake");
+  await waitFor(() => systems.length === 2);
+  assert.match(systems[1]!, /^You are Steve\./);
+  assert.match(systems[1]!, /pirate/);
+  core.kill();
+  // {{name}} filled, an edited file kept at the next start.
+  assert.equal(new Prompts(dir).text("ask-new", { count: 3 }), "The last 3 message(s) are new: answer them.");
+  assert.equal(readFileSync(join(dir, "persona.md"), "utf8"), "You are Steve.");
+});
+
+test("debug view: the folders' Markdown files listed, edited, never anything outside", async () => {
+  const path = freshDb();
+  openDb(path);
+  const prompts = mkdtempSync(join(tmpdir(), "prompts-"));
+  const memory = mkdtempSync(join(tmpdir(), "memory-"));
+  writeFileSync(join(prompts, "gate.md"), "be quiet <b>");
+  const debug = debugServer({ dbPath: path, port: 0, password: "pw", folders: { prompts, memory } });
+  const server = await debug.start();
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const auth = { authorization: `Basic ${Buffer.from("debug:pw").toString("base64")}` };
+  assert.equal((await fetch(`${base}/f/prompts/gate.md`)).status, 401);
+  assert.match(await (await fetch(`${base}/f/prompts/`, { headers: auth })).text(), /gate\.md/);
+  assert.match(await (await fetch(`${base}/f/prompts/gate.md`, { headers: auth })).text(), /be quiet &lt;b&gt;/);
+  const post = (url: string, content: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}${url}`, { method: "POST", redirect: "manual", headers: { ...auth, "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ content }) });
+  assert.equal((await post("/f/prompts/gate.md", "speak more\r\n")).status, 303);
+  assert.equal(readFileSync(join(prompts, "gate.md"), "utf8"), "speak more\n");
+  assert.equal((await post("/f/memory/common/people/paul.md", "likes tests")).status, 303);
+  assert.equal(readFileSync(join(memory, "common/people/paul.md"), "utf8"), "likes tests");
+  assert.equal((await post("/f/memory/../agent.md", "x")).status, 404);
+  assert.equal((await post("/f/memory/%2E%2E/x.md", "x")).status, 404);
+  assert.equal((await post("/f/memory/notes.txt", "x")).status, 404);
+  assert.equal((await post("/f/prompts/gate.md", "x", { origin: "https://evil.example" })).status, 403);
+  assert.equal(readFileSync(join(prompts, "gate.md"), "utf8"), "speak more\n");
   await debug.stop();
 });

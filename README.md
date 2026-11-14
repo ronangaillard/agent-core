@@ -30,6 +30,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves |
+| `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
 | `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
@@ -38,7 +39,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
 | `src/sources/github.ts` | GitHub deployments: a signed webhook, and a pass at start for what was missed |
-| `src/debug.ts` | A read-only web view of the tables, behind a password (debugging) |
+| `src/debug.ts` | A web view behind a password: the tables (read-only), the prompts and the memory (read and edited) |
 | `src/main.ts` | Startup |
 
 ## Run
@@ -50,14 +51,16 @@ npm start
 ```
 
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
-`AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
+`AGENT_PROMPTS` (default `data/prompts`: the prompts, one Markdown file each, written with their defaults when
+missing and read at every use, so an edit applies at the next message), `AGENT_PERSONA` (default `<AGENT_PROMPTS>/persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
 DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
 `AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
 memory's `common/`, not only the owner's; the persona is never in it), `AGENT_PRIVACY` (`off`: every
 conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
-`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no debug view: a read-only web view of
-the tables, basic auth with user `debug`; the tables hold private conversations), `AGENT_SHELVES` (JSON, name → folder: read-only
+`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no web view: the tables read-only, the
+prompts and the memory read and edited; basic auth with user `debug`; it shows private conversations and changes what the
+agent is told), `AGENT_SHELVES` (JSON, name → folder: read-only
 folders the memory tools also read, for everyone, never written nor put in the prompt; e.g. `{"code":"/app/src"}`
 lets the agent read its own source, the version running).
 

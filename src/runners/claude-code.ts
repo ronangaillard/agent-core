@@ -1,3 +1,4 @@
+import { Prompts } from "../prompts.ts";
 import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -29,8 +30,10 @@ export type ClaudeCodeOptions = {
   githubToken: string;
   /** Tokens by repository owner (case-insensitive), e.g. one per organisation; githubToken for the others. */
   githubTokens?: Record<string, string>;
-  /** The agent, as the session's system prompt starts. */
+  /** The agent, as the session's system prompt starts: the default of the persona prompt. */
   persona: string;
+  /** The editable texts (persona, code-task, code-task-terminal); default: the built-in ones. */
+  prompts?: Prompts;
   name: string;
   model?: string;
   executable?: string;
@@ -283,6 +286,8 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     }
     let pr = task.pr;
     const remoteTerminal = options.terminal;
+    const prompts = options.prompts ?? new Prompts();
+    if (!options.prompts) prompts.seed("persona", options.persona);
     let opened: Promise<Terminal> | undefined;
     const openTerminal = () => {
       if (!remoteTerminal) throw new Error("no remote terminal");
@@ -364,7 +369,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           .filter(Boolean)
           .join("\n\n"),
         options: {
-          systemPrompt: `${options.persona}\n\nYou are doing a code task in your own copy of ${task.repo}. Read the code and follow its conventions, make a focused change, run the project's checks, commit, then push_branch and open_pr. Never merge, never push elsewhere: it is enforced. The copy has no network to GitHub: its origin is a local repository your terminal cannot read, so never git fetch, pull or ls-remote; push_branch pushes and open_pr opens the PR for you. Give news with progress on long tasks. End with a short report.${remoteTerminal ? " Your terminal is the terminal tool (a container with only your copy); read and change files with Read, Edit, Write, Glob, Grep." : ""}`,
+          systemPrompt: [prompts.text("persona"), prompts.text("code-task", { repo: task.repo }), remoteTerminal ? prompts.text("code-task-terminal") : ""].filter(Boolean).join("\n\n"),
           cwd: dir,
           ...(options.model ? { model: options.model } : {}),
           ...(options.executable ? { pathToClaudeCodeExecutable: options.executable } : {}),

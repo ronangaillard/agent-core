@@ -272,10 +272,11 @@ export function slackConnector(options: {
         z.object({
           messages: z.array(z.string()).describe("The messages to post, in order. Empty list: say nothing."),
         }),
-      guide: (row) =>
-        row.dm
-          ? "You are writing on Slack, in a direct message. Answer like a person on Slack: short, in the tone used, no headings or lists unless it is technical."
-          : "You are writing on Slack, in a thread. Short, in the tone used. If you have nothing useful to add, say nothing (empty list).",
+      prompts: {
+        "slack-dm": "You are writing on Slack, in a direct message. Answer like a person on Slack: short, in the tone used, no headings or lists unless it is technical.",
+        "slack-thread": "You are writing on Slack, in a thread. Short, in the tone used. If you have nothing useful to add, say nothing (empty list).",
+      },
+      guide: (row) => ({ prompt: row.dm ? "slack-dm" : "slack-thread" }),
       toPosts: (output) => ({
         posts: (output as { messages: string[] }).messages.filter((text) => text.trim()).map((text): Post => ({ text })),
         held: false,

@@ -77,7 +77,10 @@ export function localTime(iso: string): string {
 /** The shape of a reply on a connector. */
 export type Form = {
   schema(row: InboxRow, scope: Scope): z.ZodType;
-  guide(row: InboxRow, scope: Scope): string;
+  /** The prompts this form is guided by, by name, with their defaults (editable like the others). */
+  prompts: Record<string, string>;
+  /** Which of its prompts guides this reply, with the values its {{name}}s take. */
+  guide(row: InboxRow, scope: Scope): { prompt: string; vars?: Record<string, string> };
   /** held: the posts wait for the owner; note: what he reads to decide (what it answers, why it waits). */
   toPosts(output: unknown): { posts: Post[]; held: boolean; note?: string };
 };

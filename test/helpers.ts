@@ -110,9 +110,10 @@ export class FakeConnector implements Connector {
   holdWith: string | undefined;
   form = {
     schema: () => z.object({ messages: z.array(z.string()) }),
+    prompts: { fake: "Answer." },
     guide: (_row: InboxRow, scope: Scope) => {
       this.scopes.push(scope);
-      return "Answer.";
+      return { prompt: "fake" };
     },
     toPosts: (output: unknown) => ({
       posts: (output as { messages: string[] }).messages.map((text): Post => ({ text })),

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { claudeBrain } from "./claude.ts";
 import { emailConnector } from "./connectors/email.ts";
 import { debugServer } from "./debug.ts";
@@ -7,6 +8,7 @@ import { Core, defaultConfig } from "./core.ts";
 import { openDb } from "./db.ts";
 import { historyTools } from "./history.ts";
 import { Memory } from "./memory.ts";
+import { DEFAULT_PROMPTS, Prompts } from "./prompts.ts";
 import { ownerCommands } from "./owner.ts";
 import { githubSource } from "./sources/github.ts";
 import { apercuTerminal } from "./runners/apercu.ts";
@@ -21,8 +23,11 @@ const required = (name: string) => {
 };
 
 const ownerId = required("OWNER_SLACK_ID");
-const personaFile = process.env.AGENT_PERSONA ?? "persona.md";
-const persona = existsSync(personaFile) ? readFileSync(personaFile, "utf8") : "You are an agent chatting on Slack.";
+/** AGENT_PROMPTS: the folder of the editable prompts, one Markdown file each, written with their defaults if missing. */
+const promptsDir = process.env.AGENT_PROMPTS ?? "data/prompts";
+const personaFile = process.env.AGENT_PERSONA ?? join(promptsDir, "persona.md");
+const prompts = new Prompts(promptsDir, { persona: personaFile });
+const persona = existsSync(personaFile) ? readFileSync(personaFile, "utf8") : DEFAULT_PROMPTS.persona!;
 const ownerChannel = process.env.AGENT_OWNER_CHANNEL;
 const userToken = process.env.SLACK_USER_TOKEN;
 const executable = process.env.CLAUDE_CODE_EXECUTABLE ? { executable: process.env.CLAUDE_CODE_EXECUTABLE } : {};
@@ -65,6 +70,7 @@ const runner =
         githubToken: process.env.GITHUB_TOKEN,
         githubTokens: tokensFromEnv(process.env),
         persona,
+        prompts,
         name: process.env.AGENT_NAME ?? "Agent",
         ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}),
         ...executable,
@@ -75,15 +81,19 @@ const runner =
 const dbPath = process.env.AGENT_DB ?? "data/agent.db";
 const db = openDb(dbPath);
 
-/** A read-only web view of the tables: off unless both are set (the tables hold private conversations). */
-const debug =
-  process.env.AGENT_DEBUG_PORT && process.env.AGENT_DEBUG_PASSWORD
-    ? debugServer({ dbPath, port: Number(process.env.AGENT_DEBUG_PORT), password: process.env.AGENT_DEBUG_PASSWORD })
-    : undefined;
 /** AGENT_SHELVES: read-only folders the memory tools also read, e.g. {"code":"/app/src"} (the agent's own source). */
 const shelves = JSON.parse(process.env.AGENT_SHELVES ?? "{}") as Record<string, string>;
 /** AGENT_MEMORY_WRITERS=all: every conversation writes the memory (common/), not only the owner's. */
 const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves, process.env.AGENT_MEMORY_WRITERS === "all" ? "all" : "owner");
+
+/**
+ * The web view: the tables (read-only), and the prompts and the memory (read and edited). Off unless both are set:
+ * it shows private conversations and changes what the agent is told.
+ */
+const debug =
+  process.env.AGENT_DEBUG_PORT && process.env.AGENT_DEBUG_PASSWORD
+    ? debugServer({ dbPath, port: Number(process.env.AGENT_DEBUG_PORT), password: process.env.AGENT_DEBUG_PASSWORD, folders: { prompts: promptsDir, memory: memory.root } })
+    : undefined;
 
 const core = new Core({
   db,
@@ -96,6 +106,7 @@ const core = new Core({
   brain: claudeBrain({ ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}), ...executable }),
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
+  prompts,
   tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy })],
   config: {
     ...defaultConfig,

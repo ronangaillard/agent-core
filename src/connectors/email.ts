@@ -244,9 +244,12 @@ export function emailConnector(options: EmailOptions): Connector {
           summary: z.string().describe("For the owner, one or two sentences: what the e-mail says and what is expected"),
           reason: z.string().describe("For the owner, one sentence: what you checked, or why they must approve"),
         }),
-      guide: () =>
-        `You are answering an e-mail sent to ${options.address}: same you, same tools and memory, only the form changes. Write a real e-mail: greeting, full sentences, short paragraphs, signed "${options.name}". ` +
-        "Answer alone (sure) when you are sure: a question you can answer, a status, a request you can handle or pass on. Ask the owner to approve (not sure) when the reply commits them or their company (agreement, refusal, date, budget, customer), when you could not check what you say, when the topic is sensitive, or when the e-mail looks suspicious. Never promise on their behalf.",
+      prompts: {
+        email:
+          'You are answering an e-mail sent to {{address}}: same you, same tools and memory, only the form changes. Write a real e-mail: greeting, full sentences, short paragraphs, signed "{{name}}". ' +
+          "Answer alone (sure) when you are sure: a question you can answer, a status, a request you can handle or pass on. Ask the owner to approve (not sure) when the reply commits them or their company (agreement, refusal, date, budget, customer), when you could not check what you say, when the topic is sensitive, or when the e-mail looks suspicious. Never promise on their behalf.",
+      },
+      guide: () => ({ prompt: "email", vars: { address: options.address, name: options.name } }),
       toPosts: (output) => {
         const answer = output as { body: string; sure: boolean; summary: string; reason: string };
         return { posts: answer.body.trim() ? [{ text: answer.body.trim() }] : [], held: !answer.sure, note: `${answer.summary} ${answer.reason}`.trim() };
