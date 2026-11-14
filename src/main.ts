@@ -28,6 +28,8 @@ const executable = process.env.CLAUDE_CODE_EXECUTABLE ? { executable: process.en
 
 /** AGENT_MODES: a JSON object, mode_key → mode, e.g. {"slack:C0123":"triage"}. */
 const modes = JSON.parse(process.env.AGENT_MODES ?? "{}") as Record<string, Mode>;
+/** AGENT_PRIVACY=off: every conversation recalls everything said elsewhere, private or not (one trusted team). */
+const privacy = process.env.AGENT_PRIVACY !== "off";
 
 /** AGENT_DESTINATIONS: where the send tool may post, e.g. {"team":{"channel":"C0123","rules":["all"]}}. */
 const destinations = Object.fromEntries(
@@ -87,12 +89,13 @@ const core = new Core({
   brain: claudeBrain({ ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}), ...executable }),
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
-  tools: [...memory.tools(), ...historyTools(new Store(db), ownerId)],
+  tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy })],
   config: {
     ...defaultConfig,
     ownerId,
     persona,
     modes,
+    privacy,
     destinations,
     repos,
     ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),

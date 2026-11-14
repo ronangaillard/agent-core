@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Core } from "./core.ts";
 import type { Store, TaskRecord } from "./store.ts";
-import type { Scope, ToolDef } from "./types.ts";
+import { localTime, mayRecall, type Privacy, type Scope, type ToolDef } from "./types.ts";
 
 /** One run of a code task, as the core hands it to the runner. */
 export type TaskRun = {
@@ -26,8 +26,8 @@ export type TaskOutcome = { report: string; status: "waiting" | "done" };
 /** Does the work: a copy, a branch, a session with a terminal. Throws when it cannot. */
 export type TaskRunner = (run: TaskRun) => Promise<TaskOutcome>;
 
-/** The same rule as the digest: a private task shows only to the owner, and only if it was his. */
-export const taskVisible = (task: TaskRecord, scope: Scope, ownerId: string) => !task.private || (scope.owner && task.requester === ownerId);
+/** The same rule as the digest. */
+export const taskVisible = (task: TaskRecord, scope: Scope, privacy: Privacy) => mayRecall({ private: task.private, author: task.requester }, scope, privacy);
 
 const ago = (at: string) => {
   const minutes = Math.round((Date.now() - Date.parse(at)) / 60_000);
@@ -41,12 +41,12 @@ export const taskLine = (task: TaskRecord) =>
  * What the agent has going on, for the prompt: code tasks (open, or done within 7 days), upcoming reminders, and for
  * the owner what waits for his approval. Filtered like <elsewhere>: nothing private of someone else.
  */
-export function inProgress(store: Store, scope: Scope, ownerId: string, threadKey: string): string {
+export function inProgress(store: Store, scope: Scope, privacy: Privacy, threadKey: string): string {
   const lines: string[] = [];
-  for (const task of store.recentTasks(new Date(Date.now() - 7 * 24 * 3600_000).toISOString())) if (task.thread_key === threadKey || taskVisible(task, scope, ownerId)) lines.push(`- ${taskLine(task)}`);
+  for (const task of store.recentTasks(new Date(Date.now() - 7 * 24 * 3600_000).toISOString())) if (task.thread_key === threadKey || taskVisible(task, scope, privacy)) lines.push(`- ${taskLine(task)}`);
   for (const reminder of store.upcomingReminders(10)) {
-    if (reminder.private && reminder.thread_key !== threadKey && !(scope.owner && reminder.created_by === ownerId)) continue;
-    lines.push(`- reminder #${reminder.id} at ${reminder.due_at}: "${reminder.note}" · ${reminder.thread_key}`);
+    if (reminder.thread_key !== threadKey && !mayRecall({ private: reminder.private, author: reminder.created_by ?? "" }, scope, privacy)) continue;
+    lines.push(`- reminder #${reminder.id} at ${localTime(reminder.due_at)}: "${reminder.note}" · ${reminder.thread_key}`);
   }
   if (scope.owner) for (const lot of store.held()) lines.push(`- waiting for the owner's approval #${lot.batch}: "${lot.texts.join(" / ").slice(0, 120)}" · ${lot.thread_key}`);
   return lines.join("\n");

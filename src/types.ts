@@ -55,6 +55,23 @@ export type Thread = { label: string; messages: ThreadMessage[] };
 /** Who speaks, where: decided by code, never by the model. */
 export type Scope = { owner: boolean; requester: string; private: boolean };
 
+/**
+ * What one conversation may recall of the others. on: what was said in private never comes up elsewhere, except to
+ * the owner what the owner said. off: every conversation recalls everything (one trusted team).
+ */
+export type Privacy = { ownerId: string; on: boolean };
+
+export const mayRecall = (item: { private: boolean; author: string }, scope: Scope, privacy: Privacy) =>
+  !privacy.on || !item.private || (scope.owner && item.author === privacy.ownerId);
+
+/** A date as the agent reads it: local time (the process's TZ), to the minute. */
+export function localTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** The shape of a reply on a connector. */
 export type Form = {
   schema(row: InboxRow, scope: Scope): z.ZodType;

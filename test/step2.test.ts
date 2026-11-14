@@ -126,7 +126,7 @@ test("tools: the model only sees what the scope allows, and each tool checks aga
   const connector = new FakeConnector(world);
   const seen: string[][] = [];
   const brain: Brain = async ({ tools = [] }) => {
-    seen.push(tools.map((t) => t.name).filter((name) => !["send", "set_reminder", "list_reminders", "cancel_reminder"].includes(name)).sort());
+    seen.push(tools.map((t) => t.name).filter((name) => !["send", "read_conversation", "set_reminder", "list_reminders", "cancel_reminder"].includes(name)).sort());
     return { messages: ["ok"] };
   };
   const tools: ToolDef[] = [
@@ -174,20 +174,28 @@ test("digest and search: a private conversation never comes up elsewhere, except
   record(world.say("owner's plan", { thread: "owner-dm" }), "owner's plan");
   record({ ...world.say("public topic", { thread: "chan", dm: false, mention: true, author: "ines", ownerOnly: false }), private: false }, "public topic");
   record(world.say("current", { thread: "here" }), "current");
+  const on = { ownerId: "ronan", on: true };
 
-  const forOwner = digest(store, "fake:here", owner, "ronan");
+  const forOwner = digest(store, "fake:here", owner, on);
   assert.match(forOwner, /owner's plan/);
   assert.match(forOwner, /public topic/);
   assert.doesNotMatch(forOwner, /paul's secret/);
   assert.doesNotMatch(forOwner, /current/);
-  const forColleague = digest(store, "fake:here", colleague, "ronan");
+  const forColleague = digest(store, "fake:here", colleague, on);
   assert.match(forColleague, /public topic/);
   assert.doesNotMatch(forColleague, /owner's plan/);
 
-  const [search] = historyTools(store, "ronan");
+  const [search] = historyTools(store, on);
   const context = { scope: colleague, threadKey: "fake:here", lotIds: [], connector: "fake", address: { connector: "fake", conversation: "here", thread: "main" } };
   assert.match(await search!.run({ keywords: "topic" }, context), /public topic/);
   assert.equal(await search!.run({ keywords: "secret" }, context), "Nothing found.");
+
+  // Privacy off (one trusted team): everything comes up everywhere, with ids and local times.
+  const off = { ownerId: "ronan", on: false };
+  assert.match(digest(store, "fake:here", colleague, off), /paul's secret/);
+  assert.match(digest(store, "fake:here", colleague, off), /\d{4}-\d\d-\d\d \d\d:\d\d message:\d+ /);
+  const [open] = historyTools(store, off);
+  assert.match(await open!.run({ keywords: "secret" }, context), /paul's secret/);
 });
 
 test("shelves: read-only folders anyone reads through the memory tools, never written, never in the prompt", () => {

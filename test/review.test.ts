@@ -81,8 +81,8 @@ test("a draft in the owner's name stays his: never in anyone else's digest, sent
   await waitFor(() => core.store.held().length === 1);
   core.ingest(world.say(`drop ${id}`, { thread: "owner" }), "fake");
   await waitFor(() => core.store.held().length === 0);
-  assert.doesNotMatch(digest(core.store, "fake:elsewhere", colleague, "ronan"), /40k/);
-  assert.match(digest(core.store, "fake:elsewhere", { owner: true, requester: "ronan", private: true }, "ronan"), /40k/);
+  assert.doesNotMatch(digest(core.store, "fake:elsewhere", colleague, { ownerId: "ronan", on: true }), /40k/);
+  assert.match(digest(core.store, "fake:elsewhere", { owner: true, requester: "ronan", private: true }, { ownerId: "ronan", on: true }), /40k/);
   core.kill();
 });
 

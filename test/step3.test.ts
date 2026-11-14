@@ -159,6 +159,23 @@ test("send: the rights come from the scope, never from the model", async () => {
   core.kill();
 });
 
+test("read_conversation: a whole other conversation, under the privacy rule", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const strict = makeCore(freshDb(), connector, echoBrain().brain);
+  const paul = strict.store.ingest(world.say("secret", { thread: "paul-dm", author: "paul", ownerOnly: false }), "fake")!;
+  const open = strict.store.ingest({ ...world.say("long debate", { thread: "chan", dm: false, author: "reginald", ownerOnly: false }), private: false }, "fake")!;
+  assert.match(await strict.readConversation(context(owner), `message:${paul}`), /No such message/);
+  assert.match(await strict.readConversation(context(colleague), `message:${open}`), /reginald: long debate/);
+  assert.match(await strict.readConversation(context(owner, "chan"), `message:${open}`), /this conversation/);
+  strict.kill();
+  // Privacy off: anyone reads anything.
+  const loose = makeCore(freshDb(), connector, echoBrain().brain, { privacy: false });
+  const again = loose.store.ingest(world.say("secret 2", { thread: "paul-dm", author: "paul", ownerOnly: false }), "fake")!;
+  assert.match(await loose.readConversation(context(colleague), `message:${again}`), /paul: secret 2/);
+  loose.kill();
+});
+
 test("jobs: run on their schedule, invisible to the tools; a job gone from the code is dropped", async () => {
   const path = freshDb();
   const store = new Store(openDb(path));

@@ -20,6 +20,13 @@ export function actTools(core: Core): ToolDef[] {
       run: (args, context) => core.send(context, String(args.to), String(args.text)),
     },
     {
+      name: "read_conversation",
+      description: "Read in full another conversation you took part in, given one of its messages (message:<id>, from <elsewhere> or search_conversations).",
+      input: { message: z.string().describe("message:<id>") },
+      rules: ["all"],
+      run: (args, context) => core.readConversation(context, String(args.message)),
+    },
+    {
       name: "set_reminder",
       description: "Be woken up later in this conversation, with this note. The note is all you will have: make it self-contained.",
       input: {

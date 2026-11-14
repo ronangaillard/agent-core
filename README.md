@@ -51,7 +51,8 @@ npm start
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
 `AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
 DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
-`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
+`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_PRIVACY` (`off`: every
+conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
 `{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no debug view: a read-only web view of
 the tables, basic auth with user `debug`; the tables hold private conversations), `AGENT_SHELVES` (JSON, name → folder: read-only
@@ -89,7 +90,8 @@ Step 1, done: the durable core end to end, the Slack connector (a DM gets a repl
 Step 2, done: engagement modes per place (`mention`, `mention-sticky`, `triage` by a cheap model, outside the
 `respond()` quota), the bot-to-bot cap (bot or system messages in a row within an hour, one "I'm stopping" post,
 reset by a human), the catch-up from a cursor frozen before connecting and at disconnection, tools with rules
-checked twice, the Markdown memory, the `<elsewhere>` digest and the conversation search with the privacy rule.
+checked twice, the Markdown memory, the `<elsewhere>` digest and the conversation search with the privacy rule (local times, `message:<id>` on
+each line), and `read_conversation`, which reads the whole conversation of a `message:<id>` under the same rule.
 
 Step 3, done:
 - `send` to a named destination (with its rules), or for the owner to a person (`resolve`) or to the thread of a
