@@ -8,6 +8,7 @@ import { historyTools } from "./history.ts";
 import { Memory } from "./memory.ts";
 import { ownerCommands } from "./owner.ts";
 import { githubSource } from "./sources/github.ts";
+import { claudeCodeRunner } from "./runners/claude-code.ts";
 import { Store } from "./store.ts";
 import type { Mode, Rule } from "./types.ts";
 
@@ -50,6 +51,20 @@ const email =
       })
     : undefined;
 
+/** Code tasks: off unless a GitHub token and the repositories are set. */
+const repos = (process.env.AGENT_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+const runner =
+  process.env.GITHUB_TOKEN && repos.length
+    ? claudeCodeRunner({
+        workspace: process.env.AGENT_WORKSPACE ?? "data/workspace",
+        githubToken: process.env.GITHUB_TOKEN,
+        persona,
+        name: process.env.AGENT_NAME ?? "Agent",
+        ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}),
+        ...executable,
+      })
+    : undefined;
+
 const db = openDb(process.env.AGENT_DB ?? "data/agent.db");
 const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory");
 
@@ -60,6 +75,7 @@ const core = new Core({
     ...(email ? [email] : []),
   ],
   commands: ownerCommands(),
+  ...(runner ? { runner } : {}),
   brain: claudeBrain({ ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}), ...executable }),
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
@@ -70,6 +86,7 @@ const core = new Core({
     persona,
     modes,
     destinations,
+    repos,
     ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),
     // Drafts in the owner's name need his token, and his DM to approve them.
     draftForOwner: Boolean(userToken && ownerChannel),

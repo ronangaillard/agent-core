@@ -26,6 +26,8 @@ tokens come from the environment.
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private |
 | `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
+| `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, the `<in_progress>` block |
+| `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
 | `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
@@ -50,6 +52,10 @@ DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
 The webhook takes the `deployment_status` event; only final states count, once per deployment.
+
+Code tasks (off unless both are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default);
+`AGENT_WORKSPACE` (default `data/workspace`). The session's terminal runs in Claude Code's sandbox (on Linux it needs
+`bubblewrap`): it writes only in the task's copy and reaches only package registries.
 
 E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
 `AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS` and `OWNER_EMAILS`
@@ -100,5 +106,21 @@ Step 4, done:
   References), a form where the agent says whether it is sure.
 - Polls need no code of their own: `send` to people, and a destination for the owner.
 
-Not yet: code tasks. Known limits: the owner's own DMs with colleagues (his user token's events) are not read; an
+Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
+- `start_code_task`: with no number, it continues the only task open in the conversation, or starts one; with a
+  number, it continues that task from anywhere it is visible (same privacy rule as the digest), and reports in the
+  task's own conversation. A running task is changed only by its requester or the owner; the rights of a
+  continuation are the lesser of the task's and the requester's. One task runs at a time; a replaced run says
+  nothing.
+- Reports and progress notes (at most 5, spaced out) go to the task's conversation as outbox `report` rows; a failure
+  is a one-line "blocked" report and an alert. A task a restart cut runs again (twice at most), then is abandoned
+  with a word.
+- `<in_progress>` in every prompt: open tasks and those done within 7 days, upcoming reminders, and for the owner
+  what waits for him.
+- The Claude Code runner: the token stays in this process (clone, push, PR through a header of one command, never
+  in the copy); the session gets file tools inside its copy, a sandboxed terminal, and `progress`, `push_branch`,
+  `open_pr`; everything else is refused.
+
+Known limits: a permission the session lacks is refused, not asked to the owner; a merged PR leaves its task
+`waiting`; the owner's own DMs with colleagues (his user token's events) are not read; an
 e-mail's thread is the subject, and `read()` gives the e-mail itself (its quoted history included).

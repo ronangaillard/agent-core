@@ -11,7 +11,7 @@ const classify = (error: unknown) => {
 };
 
 /** Claude Code rejects the draft 2020-12 `$schema` marker zod adds. */
-function jsonSchema(schema: z.ZodType): Record<string, unknown> {
+export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   const { $schema: _marker, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>;
   return rest;
 }

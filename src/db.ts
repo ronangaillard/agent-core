@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 /**
  * inbox and outbox carry the state (a status, updated); events keeps the history (append-only). Every status change
  * writes its event in the same transaction. reminders holds what is due later: the reminders the agent set, and jobs.
+ * tasks holds the code tasks: one copy, one branch, one PR each, continued across conversations.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS inbox (
@@ -83,6 +84,26 @@ CREATE TABLE IF NOT EXISTS reminders (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reminders_due ON reminders (due_at);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  connector TEXT NOT NULL,
+  address TEXT NOT NULL,
+  thread_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  pr INTEGER,
+  status TEXT NOT NULL,
+  request TEXT NOT NULL,
+  requester TEXT NOT NULL,
+  owner_asked INTEGER NOT NULL,
+  private INTEGER NOT NULL,
+  resumes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_thread ON tasks (thread_key, status);
 `;
 
 export function openDb(path: string): DatabaseSync {

@@ -58,6 +58,47 @@ const reminderOf = (r: Row): ReminderRecord => ({
   private: Boolean(r.private),
 });
 
+export type TaskStatus = "running" | "waiting" | "done" | "abandoned";
+
+export type TaskRecord = {
+  id: number;
+  connector: string;
+  address: Address;
+  thread_key: string;
+  title: string;
+  repo: string;
+  branch: string;
+  pr: number | null;
+  status: TaskStatus;
+  /** The latest request: what a restart runs again. */
+  request: string;
+  requester: string;
+  owner_asked: boolean;
+  private: boolean;
+  resumes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+const taskOf = (r: Row): TaskRecord => ({
+  id: Number(r.id),
+  connector: String(r.connector),
+  address: JSON.parse(String(r.address)) as Address,
+  thread_key: String(r.thread_key),
+  title: String(r.title),
+  repo: String(r.repo),
+  branch: String(r.branch),
+  pr: r.pr === null ? null : Number(r.pr),
+  status: String(r.status) as TaskStatus,
+  request: String(r.request),
+  requester: String(r.requester),
+  owner_asked: Boolean(r.owner_asked),
+  private: Boolean(r.private),
+  resumes: Number(r.resumes),
+  created_at: String(r.created_at),
+  updated_at: String(r.updated_at),
+});
+
 const inboxOf = (r: Row): InboxRecord => ({
   id: Number(r.id),
   source_id: String(r.source_id),
@@ -191,6 +232,65 @@ export class Store {
     });
   }
 
+  // --- code tasks ----------------------------------------------------------------------------------------------
+
+  createTask(t: { connector: string; address: Address; thread_key: string; title: string; repo: string; request: string; requester: string; owner_asked: boolean; private: boolean }): TaskRecord {
+    return tx(this.db, () => {
+      const at = now();
+      const result = this.db
+        .prepare(
+          `INSERT INTO tasks (connector, address, thread_key, title, repo, branch, status, request, requester, owner_asked, private, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, '', 'running', ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(t.connector, JSON.stringify(t.address), t.thread_key, t.title, t.repo, t.request, t.requester, t.owner_asked ? 1 : 0, t.private ? 1 : 0, at, at);
+      const id = Number(result.lastInsertRowid);
+      const slug = t.title.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+      this.db.prepare("UPDATE tasks SET branch = ? WHERE id = ?").run(`agent/${id}${slug ? `-${slug}` : ""}`, id);
+      this.event({ kind: "task_started", thread_key: t.thread_key, author_id: t.requester, private: t.private, ref: id, payload: { title: t.title, repo: t.repo } });
+      return this.task(id)!;
+    });
+  }
+
+  task(id: number): TaskRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
+    return row ? taskOf(row) : undefined;
+  }
+
+  /** Running or waiting in this conversation. */
+  openTasks(threadKey: string): TaskRecord[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE thread_key = ? AND status IN ('running', 'waiting') ORDER BY id").all(threadKey) as Row[]).map(taskOf);
+  }
+
+  /** Running or waiting anywhere, and those finished since this date: newest first. */
+  recentTasks(since: string): TaskRecord[] {
+    return (
+      this.db.prepare("SELECT * FROM tasks WHERE status IN ('running', 'waiting') OR (status = 'done' AND updated_at >= ?) ORDER BY updated_at DESC LIMIT 20").all(since) as Row[]
+    ).map(taskOf);
+  }
+
+  tasksWith(status: TaskStatus): TaskRecord[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE status = ? ORDER BY id").all(status) as Row[]).map(taskOf);
+  }
+
+  /** A change of the task, its event with it; a report to its conversation too, when there is one. */
+  updateTask(id: number, fields: Partial<Pick<TaskRecord, "status" | "pr" | "request" | "requester" | "owner_asked" | "resumes">>, report?: string) {
+    tx(this.db, () => {
+      const task = this.task(id);
+      if (!task) return;
+      const columns = Object.keys(fields);
+      if (columns.length) {
+        const values = Object.values(fields).map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : (v ?? null)) as SQLInputValue);
+        this.db.prepare(`UPDATE tasks SET ${columns.map((c) => `${c} = ?`).join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), id);
+      }
+      if (fields.status) this.event({ kind: `task_${fields.status}`, thread_key: task.thread_key, private: task.private, ref: id });
+      if (report) {
+        this.db
+          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
+          .run(task.thread_key, task.connector, JSON.stringify(task.address), JSON.stringify({ text: report }), now());
+      }
+    });
+  }
+
   // --- reminders and jobs --------------------------------------------------------------------------------------
 
   addReminder(r: { due_at: string; repeat_minutes: number | null; note: string; connector: string; address: Address; thread_key: string; created_by: string; private: boolean }): number {
@@ -223,6 +323,10 @@ export class Store {
 
   cancelReminder(id: number, threadKey: string): boolean {
     return this.db.prepare("DELETE FROM reminders WHERE id = ? AND kind = 'reminder' AND thread_key = ?").run(id, threadKey).changes === 1;
+  }
+
+  upcomingReminders(limit: number): ReminderRecord[] {
+    return (this.db.prepare("SELECT * FROM reminders WHERE kind = 'reminder' ORDER BY due_at LIMIT ?").all(limit) as Row[]).map(reminderOf);
   }
 
   dueReminders(): ReminderRecord[] {

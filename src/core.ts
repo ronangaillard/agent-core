@@ -3,9 +3,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { allows, bind } from "./access.ts";
 import { actTools } from "./act.ts";
+import { inProgress, taskTools, taskVisible, type TaskRunner } from "./tasks.ts";
 import { digest } from "./history.ts";
 import type { Memory } from "./memory.ts";
-import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord } from "./store.ts";
+import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type TaskRecord } from "./store.ts";
 import { TransientError, type Address, type Brain, type Connector, type DeliverResult, type InboxRow, type Mode, type Post, type Rule, type Scope, type ToolContext, type ToolDef } from "./types.ts";
 
 const SAFETY =
@@ -48,6 +49,12 @@ export type CoreConfig = {
   /** Named places the send tool may post to, each with who may use it. */
   destinations: Record<string, { address: Address; rules: Rule[] }>;
   maxRemindersPerThread: number;
+  /** The repositories code tasks may work on; the first is the default. */
+  repos: string[];
+  /** A task a restart cut is run again this many times at most. */
+  maxTaskResumes: number;
+  /** Progress notes of a task: at most 5, this far apart. */
+  taskNoteGapMs: number;
 };
 
 export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
@@ -68,6 +75,9 @@ export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
   maxRemindersPerThread: 5,
   ownerName: "the owner",
   draftForOwner: false,
+  repos: [],
+  maxTaskResumes: 2,
+  taskNoteGapMs: 2 * 60_000,
 };
 
 /** An owner's command: matched on the text of a row in his private scope, answered without the model. */
@@ -93,6 +103,8 @@ export type CoreOptions = {
   memory?: Memory;
   jobs?: Record<string, Job>;
   commands?: Command[];
+  /** Does the code tasks. None: no start_code_task tool. */
+  runner?: TaskRunner;
 };
 
 /** A plain semaphore: at most n respond() at once; settle and triage stay outside. */
@@ -151,13 +163,16 @@ export class Core {
   private readonly slots: Slots;
   private readonly tools: ToolDef[];
   private timer: NodeJS.Timeout | undefined;
+  /** The code tasks running or queued (one runs at a time), by task id. */
+  private readonly runs = new Map<number, AbortController>();
+  private taskQueue: Promise<unknown> = Promise.resolve();
   private stopped = false;
 
   constructor(private readonly options: CoreOptions) {
     this.store = new Store(options.db);
     this.slots = new Slots(options.config.maxRuns);
     for (const connector of options.connectors) this.connectors.set(connector.id, connector);
-    this.tools = [...(options.tools ?? []), ...actTools(this)];
+    this.tools = [...(options.tools ?? []), ...actTools(this), ...(options.runner && options.config.repos.length ? taskTools(this, options.config.repos) : [])];
   }
 
   private get config() {
@@ -183,6 +198,7 @@ export class Core {
       await connector.start((raw) => void this.receive(connector, raw));
       if (cursor) void this.catchUp(connector, cursor);
     }
+    this.resumeTasks();
     this.wake();
   }
 
@@ -206,6 +222,8 @@ export class Core {
     this.stopped = true;
     clearTimeout(this.timer);
     for (const ids of this.lots.values()) this.store.uncountAttempt(ids);
+    // Tasks keep their status running: the next start runs them again.
+    for (const abort of this.runs.values()) abort.abort();
     for (const connector of this.connectors.values()) await connector.stop?.();
   }
 
@@ -213,6 +231,7 @@ export class Core {
   kill() {
     this.stopped = true;
     clearTimeout(this.timer);
+    for (const abort of this.runs.values()) abort.abort();
   }
 
   private async receive(connector: Connector, raw: unknown) {
@@ -365,6 +384,113 @@ export class Core {
     this.store.dead(row, result.error);
     this.store.freeKey(id);
     return `Not sent: ${result.error}.`;
+  }
+
+  // --- code tasks ----------------------------------------------------------------------------------------------
+
+  /**
+   * The start_code_task tool. Which task: the one named (if visible from here), else the only one open in this
+   * conversation, else a new one. A running task is changed only by its requester or the owner; the rights of the
+   * continuation are the lesser of the task's and the requester's.
+   */
+  async startTask(context: ToolContext, ask: { request: string; title?: string; task?: number; fresh: boolean; repo?: string }): Promise<string> {
+    const { scope } = context;
+    // Its own conversation always sees a task; elsewhere, the privacy rule of the digest.
+    const visible = (task: TaskRecord) => task.thread_key === context.threadKey || taskVisible(task, scope, this.config.ownerId);
+    const known = () => {
+      const list = this.store.recentTasks(new Date(Date.now() - 30 * 24 * 3600_000).toISOString()).filter(visible);
+      return list.length ? ` Tasks you can continue: ${list.map((t) => `#${t.id} "${t.title}"`).join(", ")}.` : "";
+    };
+    let task: TaskRecord | undefined;
+    if (ask.task !== undefined) {
+      task = this.store.task(ask.task);
+      if (!task || task.status === "abandoned" || !visible(task)) return `No task #${ask.task} to continue.${known()}`;
+    } else if (!ask.fresh) {
+      const open = this.store.openTasks(context.threadKey).filter(visible);
+      if (open.length > 1) return `Several tasks are open here: ${open.map((t) => `#${t.id} "${t.title}"`).join(", ")}. Say which one (task).`;
+      task = open[0];
+    }
+    const { ts: _, ...from } = context.address;
+    if (!task) {
+      const repo = ask.repo ?? this.config.repos[0];
+      if (!repo || !this.config.repos.includes(repo)) return `Not a repository you work on. Allowed: ${this.config.repos.join(", ")}.`;
+      const created = this.store.createTask({
+        connector: context.connector,
+        address: from,
+        thread_key: context.threadKey,
+        title: ask.title ?? ask.request.slice(0, 60),
+        repo,
+        request: ask.request,
+        requester: scope.requester,
+        owner_asked: scope.owner,
+        private: scope.private,
+      });
+      this.launch(created, ask.request, false, from);
+      return `Task #${created.id} started on ${repo} (branch ${created.branch}). Say in one sentence that you are on it; the report will come in this conversation.`;
+    }
+    if (task.status === "running" && scope.requester !== task.requester && !scope.owner) return `Task #${task.id} is running for someone else: only they or the owner can change it.`;
+    this.runs.get(task.id)?.abort();
+    this.store.updateTask(task.id, { status: "running", request: ask.request, owner_asked: task.owner_asked && scope.owner, resumes: 0 });
+    this.launch(this.store.task(task.id)!, ask.request, false, from);
+    const where = task.thread_key === context.threadKey ? "this conversation" : `its conversation (${task.thread_key})`;
+    return `Task #${task.id} continues on its copy and branch${task.pr ? ` (PR #${task.pr})` : ""}. The report will come in ${where}.`;
+  }
+
+  /** Tasks a restart cut: run again, at most maxTaskResumes times, then abandoned with a word in their conversation. */
+  private resumeTasks() {
+    if (!this.options.runner) return;
+    for (const task of this.store.tasksWith("running")) {
+      if (task.resumes >= this.config.maxTaskResumes) {
+        this.store.updateTask(task.id, { status: "abandoned" }, `Task #${task.id} blocked: cut by restarts too many times. Ask again to resume it.`);
+        continue;
+      }
+      this.store.updateTask(task.id, { resumes: task.resumes + 1 });
+      this.launch(this.store.task(task.id)!, task.request, true, task.address);
+    }
+  }
+
+  /** One task runs at a time; a replaced or stopped run writes nothing more. */
+  private launch(task: TaskRecord, request: string, resumed: boolean, from: Address) {
+    const runner = this.options.runner;
+    if (!runner) return;
+    const abort = new AbortController();
+    this.runs.set(task.id, abort);
+    const over = () => abort.signal.aborted || this.stopped;
+    let notes = 0;
+    let lastNote = 0;
+    const run = this.taskQueue.then(async () => {
+      if (over()) return;
+      try {
+        const connector = this.connectors.get(from.connector);
+        const thread = await connector?.read(from).catch(() => undefined);
+        const outcome = await runner({
+          task,
+          request,
+          conversation: thread ? thread.messages.map((m) => `${m.author}: ${m.text}`).join("\n") : "",
+          resumed,
+          signal: abort.signal,
+          progress: (text) => {
+            if (over() || notes >= 5 || Date.now() - lastNote < this.config.taskNoteGapMs) return;
+            notes++;
+            lastNote = Date.now();
+            this.store.updateTask(task.id, {}, text);
+            this.wakeOutbound();
+          },
+          setPr: (pr) => this.store.updateTask(task.id, { pr }),
+        });
+        if (over()) return;
+        this.store.updateTask(task.id, { status: outcome.status }, outcome.report);
+      } catch (error) {
+        if (over()) return;
+        const message = error instanceof Error ? error.message : String(error);
+        this.store.updateTask(task.id, { status: this.store.task(task.id)?.pr ? "waiting" : "done" }, `Task #${task.id} blocked: ${message}`);
+        this.alert(`Code task #${task.id} failed: ${message}`);
+      } finally {
+        if (this.runs.get(task.id) === abort) this.runs.delete(task.id);
+        if (!this.stopped) this.wakeOutbound();
+      }
+    });
+    this.taskQueue = run.catch(() => undefined);
   }
 
   // --- inbound -------------------------------------------------------------------------------------------------
@@ -571,6 +697,7 @@ export class Core {
     const late = lot.some((row) => row.caught_up) ? "\nSome messages arrived while you were away: take it into account." : "";
     const elsewhere = digest(this.store, last.thread_key, scope, this.config.ownerId);
     const acted = this.store.acted(last.thread_key);
+    const going = inProgress(this.store, scope, this.config.ownerId, last.thread_key);
     const system = last.author_kind === "system";
     const owner = this.config.ownerName;
     const ask = system
@@ -581,6 +708,7 @@ export class Core {
     const prompt = [
       elsewhere ? `Your other recent conversations (not this one), newest first:\n<elsewhere>\n${elsewhere}\n</elsewhere>` : "",
       `The conversation (${thread.label}), oldest first:\n<conversation>\n${transcript}\n</conversation>`,
+      going ? `What you have going on, newest first:\n<in_progress>\n${going}\n</in_progress>` : "",
       acted.length ? `You already did, from this conversation (do not do it again):\n${acted.map((line) => `- ${line}`).join("\n")}` : "",
       ask,
     ]
