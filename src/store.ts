@@ -74,6 +74,7 @@ const inboxOf = (r: Row): InboxRecord => ({
   mentions_owner: Boolean(r.mentions_owner),
   sent_at: String(r.sent_at),
   payload: JSON.parse(String(r.payload)) as unknown,
+  ...(r.text === null || r.text === undefined ? {} : { text: String(r.text) }),
   caught_up: Boolean(r.caught_up),
   status: String(r.status),
   attempts: Number(r.attempts),
@@ -123,23 +124,71 @@ export class Store {
 
   /** Inside a transaction already open. */
   private insertInbox(row: InboxRow, connector: string): number | null {
-    {
-      const result = this.db
-        .prepare(
-          `INSERT OR IGNORE INTO inbox (source_id, thread_key, mode_key, connector, address, author_id, author_kind, owner_only, private, dm,
-             mentions_agent, mentions_owner, sent_at, payload, caught_up, received_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          row.source_id, row.thread_key, row.mode_key, connector, JSON.stringify(row.address), row.author_id, row.author_kind,
-          row.owner_only ? 1 : 0, row.private ? 1 : 0, row.dm ? 1 : 0, row.mentions_agent ? 1 : 0, row.mentions_owner ? 1 : 0,
-          row.sent_at, JSON.stringify(row.payload ?? null), row.caught_up ? 1 : 0, now(),
-        );
-      if (result.changes === 0) return null;
-      const id = Number(result.lastInsertRowid);
-      this.event({ kind: "received", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: id });
-      return id;
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO inbox (source_id, thread_key, mode_key, connector, address, author_id, author_kind, owner_only, private, dm,
+           mentions_agent, mentions_owner, sent_at, payload, text, caught_up, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.source_id, row.thread_key, row.mode_key, connector, JSON.stringify(row.address), row.author_id, row.author_kind,
+        row.owner_only ? 1 : 0, row.private ? 1 : 0, row.dm ? 1 : 0, row.mentions_agent ? 1 : 0, row.mentions_owner ? 1 : 0,
+        row.sent_at, JSON.stringify(row.payload ?? null), row.text ?? null, row.caught_up ? 1 : 0, now(),
+      );
+    if (result.changes === 0) return null;
+    const id = Number(result.lastInsertRowid);
+    this.event({ kind: "received", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: id });
+    return id;
+  }
+
+  // --- what waits for the owner --------------------------------------------------------------------------------
+
+  /** The held lots, oldest first: one entry per lot, its number is the lot's batch_id. */
+  held(): { batch: number; thread_key: string; address: Address; texts: string[]; created_at: string }[] {
+    const rows = (this.db.prepare("SELECT * FROM outbox WHERE status = 'held' ORDER BY id").all() as Row[]).map(outboxOf);
+    const lots = new Map<number, { batch: number; thread_key: string; address: Address; texts: string[]; created_at: string }>();
+    for (const row of rows) {
+      const batch = row.batch_id ?? row.id;
+      const lot = lots.get(batch) ?? { batch, thread_key: row.thread_key, address: row.address, texts: [], created_at: row.created_at };
+      lot.texts.push("text" in row.payload ? row.payload.text : "");
+      lots.set(batch, lot);
     }
+    return [...lots.values()];
+  }
+
+  /** The owner lets a held lot leave, its text replaced if he edited it (then a single post). false: nothing held. */
+  release(batch: number, text?: string): boolean {
+    return tx(this.db, () => {
+      const rows = (this.db.prepare("SELECT * FROM outbox WHERE batch_id = ? AND status = 'held' ORDER BY id").all(batch) as Row[]).map(outboxOf);
+      const [first, ...rest] = rows;
+      if (!first) return false;
+      if (text !== undefined) {
+        this.db.prepare("UPDATE outbox SET payload = ? WHERE id = ?").run(JSON.stringify({ ...first.payload, text }), first.id);
+        for (const row of rest) this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'edited' WHERE id = ?").run(row.id);
+      }
+      this.db.prepare("UPDATE outbox SET status = 'pending' WHERE batch_id = ? AND status = 'held'").run(batch);
+      this.event({ kind: "released", thread_key: first.thread_key, ref: batch, payload: text === undefined ? undefined : { edited: true } });
+      return true;
+    });
+  }
+
+  discard(batch: number): boolean {
+    return tx(this.db, () => {
+      const changes = this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'dropped' WHERE batch_id = ? AND status = 'held'").run(batch).changes;
+      if (changes > 0) this.event({ kind: "dropped", ref: batch });
+      return changes > 0;
+    });
+  }
+
+  /** An owner's command: the row closed as intercepted, the answer queued in its thread, together. */
+  intercept(row: InboxRecord, answer: string) {
+    tx(this.db, () => {
+      this.db.prepare("UPDATE inbox SET status = 'done', outcome = 'intercepted', handled_at = ? WHERE id = ?").run(now(), row.id);
+      this.event({ kind: "intercepted", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id });
+      this.db
+        .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('reply', ?, ?, ?, ?, ?, 'pending', ?)")
+        .run(row.id, row.thread_key, row.connector, JSON.stringify(row.address), JSON.stringify({ text: answer }), now());
+    });
   }
 
   // --- reminders and jobs --------------------------------------------------------------------------------------
@@ -294,7 +343,13 @@ export class Store {
    * The end of respond(): the posts, the lot closed by its ids, the event with the readable text. One transaction.
    * A held reply not yet approved in this thread is replaced, not doubled.
    */
-  recordReply(lot: InboxRecord[], posts: Post[], held: boolean, readable: { input: string; output: string; author?: string; place?: string }) {
+  recordReply(
+    lot: InboxRecord[],
+    posts: Post[],
+    held: boolean,
+    readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean },
+    options: { outcome?: string; notice?: { address: Address; text: string } } = {},
+  ) {
     const last = lot[lot.length - 1]!;
     const replied = posts.length > 0;
     tx(this.db, () => {
@@ -309,7 +364,14 @@ export class Store {
         for (const post of posts) insert.run(lot[0]!.id, last.thread_key, last.connector, JSON.stringify(last.address), JSON.stringify(post), held ? "held" : "pending", now());
       }
       const ids = lot.map((r) => r.id);
-      this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(replied ? "replied" : "silent", now(), ...ids);
+      this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(options.outcome ?? (replied ? "replied" : "silent"), now(), ...ids);
+      // What waits for the owner is announced to him in the same transaction: never a held post he does not know of.
+      if (replied && held && options.notice) {
+        const { address, text } = options.notice;
+        this.db
+          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
+          .run(`${address.connector}:${address.conversation}:${address.thread}`, address.connector, JSON.stringify(address), JSON.stringify({ text }), now());
+      }
       this.event({ kind: replied ? "drafted" : "silent", thread_key: last.thread_key, author_id: last.author_id, author_kind: last.author_kind, private: lot.some((r) => r.private), ref: lot[0]!.id, payload: readable });
     });
   }
@@ -356,7 +418,11 @@ export class Store {
 
   /** The agent already spoke in this thread (mention-sticky). */
   agentSpokeIn(threadKey: string): boolean {
-    return this.db.prepare("SELECT 1 FROM outbox WHERE thread_key = ? AND kind IN ('reply', 'send') AND status = 'delivered' LIMIT 1").get(threadKey) !== undefined;
+    // A post in the owner's name is his, not the agent's.
+    return (
+      this.db.prepare("SELECT 1 FROM outbox WHERE thread_key = ? AND kind IN ('reply', 'send') AND status = 'delivered' AND json_extract(payload, '$.as') IS NULL LIMIT 1").get(threadKey) !==
+      undefined
+    );
   }
 
   /** When the agent last posted in this thread (catch-up: older messages were already seen). */

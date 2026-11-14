@@ -20,7 +20,8 @@ const cut = (text: unknown, max: number) => {
 
 const line = (e: Exchange, max: number) => {
   const output = cut(e.payload.output, max);
-  return `${e.payload.author ?? e.author_id}: "${cut(e.payload.input, max)}"${output ? ` → you: "${output}"` : " (you said nothing)"}`;
+  const answer = e.payload.for_owner ? (output ? ` → you drafted for the owner: "${output}"` : "") : output ? ` → you: "${output}"` : " (you said nothing)";
+  return `${e.payload.author ?? e.author_id}: "${cut(e.payload.input, max)}"${answer}`;
 };
 
 /** The agent's other recent conversations (72 h, 10 threads, 3 exchanges each), for the prompt. */

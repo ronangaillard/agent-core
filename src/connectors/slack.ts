@@ -25,7 +25,7 @@ const isoOf = (ts: string) => new Date(Number(ts) * 1000).toISOString();
  * Slack through Socket Mode. The membership cache is filled at start with the bot token; a miss costs one call.
  * A conversation the bot is not in never becomes a row (the owner's DMs with others included).
  */
-export function slackConnector(options: { botToken: string; appToken: string; ownerId: string }): Connector {
+export function slackConnector(options: { botToken: string; appToken: string; ownerId: string; /** To post the owner's approved drafts in his name. */ userToken?: string }): Connector {
   const receiver = new SocketModeReceiver({ appToken: options.appToken });
   // No silent retries in the client: a retried post is a possible double. The core decides.
   const app = new App({ token: options.botToken, receiver, clientOptions: { retryConfig: { retries: 0 }, rejectRateLimitedCalls: true } });
@@ -171,6 +171,7 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
         mentions_owner: text.includes(`<@${options.ownerId}>`),
         sent_at: isoOf(event.ts),
         payload: event,
+        text,
       };
     },
 
@@ -210,8 +211,11 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
 
     async deliver(address, post): Promise<DeliverResult> {
       if (!("text" in post)) return { ok: false, transient: false, error: "unsupported post" };
+      const asOwner = "as" in post && post.as === "owner";
+      if (asOwner && !options.userToken) return { ok: false, transient: false, error: "no user token to post as the owner" };
       try {
         const sent = await client.chat.postMessage({
+          ...(asOwner ? { token: options.userToken } : {}),
           channel: address.conversation,
           text: post.text,
           ...(address.thread !== "main" ? { thread_ts: address.thread } : {}),

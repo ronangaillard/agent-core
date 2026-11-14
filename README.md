@@ -26,7 +26,9 @@ tokens come from the environment.
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private |
 | `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
+| `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
+| `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
 | `src/sources/github.ts` | GitHub deployments: a signed webhook, and a pass at start for what was missed |
 | `src/main.ts` | Startup |
 
@@ -39,14 +41,19 @@ npm start
 ```
 
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
-`AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_ALERT_CHANNEL` (the owner's
-DM, for alerts), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
+`AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
+DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
+`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
 `{"channel": "C…", "rules": ["all"]}`, owner-only by default).
 
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
 The webhook takes the `deployment_status` event; only final states count, once per deployment.
+
+E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
+`AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS` and `OWNER_EMAILS`
+(comma-separated). The Resend webhook takes the `email.received` event.
 
 Do not run it on the same Slack app as another agent: both would answer.
 
@@ -80,4 +87,18 @@ Step 3, done:
 - The prompt carries what the agent already did from the conversation, and the text of system events.
 - The GitHub deployment source.
 
-Not yet: the e-mail connector and `held`, the owner's path (commands, drafts, polls), code tasks.
+Step 4, done:
+- `held`: a reply the form keeps for the owner (an e-mail the agent was not sure of, a draft in his name) never
+  leaves alone and never locks its thread; a newer one in the thread replaces it. The owner is told in the same
+  transaction, in his DM, with the draft, the form's note and how to act on it.
+- The owner's commands, matched by code on the rows of his private conversation before anything else (outcome
+  `intercepted`, no model call): list, send as is or edited, drop.
+- Drafts in the owner's name: a human mentions him where the agent would not speak → the agent writes his reply,
+  with no acting tools, held; once he sends it, it is posted with his Slack token and never counts as the agent's.
+- The e-mail connector: a Svix-signed webhook, a catch-up through the API, only allowed domains with DMARC passing,
+  the owner's scope only when he writes alone with the agent, replies in the e-mail thread (In-Reply-To,
+  References), a form where the agent says whether it is sure.
+- Polls need no code of their own: `send` to people, and a destination for the owner.
+
+Not yet: code tasks. Known limits: the owner's own DMs with colleagues (his user token's events) are not read; an
+e-mail's thread is the subject, and `read()` gives the e-mail itself (its quoted history included).

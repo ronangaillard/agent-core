@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { claudeBrain } from "./claude.ts";
+import { emailConnector } from "./connectors/email.ts";
 import { slackConnector } from "./connectors/slack.ts";
 import { Core, defaultConfig } from "./core.ts";
 import { openDb } from "./db.ts";
 import { historyTools } from "./history.ts";
 import { Memory } from "./memory.ts";
+import { ownerCommands } from "./owner.ts";
 import { githubSource } from "./sources/github.ts";
 import { Store } from "./store.ts";
 import type { Mode, Rule } from "./types.ts";
@@ -18,7 +20,8 @@ const required = (name: string) => {
 const ownerId = required("OWNER_SLACK_ID");
 const personaFile = process.env.AGENT_PERSONA ?? "persona.md";
 const persona = existsSync(personaFile) ? readFileSync(personaFile, "utf8") : "You are an agent chatting on Slack.";
-const alertChannel = process.env.AGENT_ALERT_CHANNEL;
+const ownerChannel = process.env.AGENT_OWNER_CHANNEL;
+const userToken = process.env.SLACK_USER_TOKEN;
 const executable = process.env.CLAUDE_CODE_EXECUTABLE ? { executable: process.env.CLAUDE_CODE_EXECUTABLE } : {};
 
 /** AGENT_MODES: a JSON object, mode_key → mode, e.g. {"slack:C0123":"triage"}. */
@@ -32,12 +35,31 @@ const destinations = Object.fromEntries(
   ]),
 );
 
+/** E-mail through Resend: off unless its key, webhook secret and address are set. */
+const email =
+  process.env.RESEND_API_KEY && process.env.RESEND_WEBHOOK_SECRET && process.env.AGENT_EMAIL
+    ? emailConnector({
+        apiKey: process.env.RESEND_API_KEY,
+        webhookSecret: process.env.RESEND_WEBHOOK_SECRET,
+        port: Number(process.env.EMAIL_WEBHOOK_PORT ?? 8788),
+        address: process.env.AGENT_EMAIL,
+        name: process.env.AGENT_NAME ?? "Agent",
+        allowedDomains: (process.env.EMAIL_ALLOWED_DOMAINS ?? "").split(",").map((d) => d.trim().toLowerCase()).filter(Boolean),
+        ownerEmails: (process.env.OWNER_EMAILS ?? "").split(",").map((a) => a.trim()).filter(Boolean),
+        ownerId,
+      })
+    : undefined;
+
 const db = openDb(process.env.AGENT_DB ?? "data/agent.db");
 const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory");
 
 const core = new Core({
   db,
-  connectors: [slackConnector({ botToken: required("SLACK_BOT_TOKEN"), appToken: required("SLACK_APP_TOKEN"), ownerId })],
+  connectors: [
+    slackConnector({ botToken: required("SLACK_BOT_TOKEN"), appToken: required("SLACK_APP_TOKEN"), ownerId, ...(userToken ? { userToken } : {}) }),
+    ...(email ? [email] : []),
+  ],
+  commands: ownerCommands(),
   brain: claudeBrain({ ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}), ...executable }),
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
@@ -48,7 +70,10 @@ const core = new Core({
     persona,
     modes,
     destinations,
-    ...(alertChannel ? { alertAddress: { connector: "slack", conversation: alertChannel, thread: "main" } } : {}),
+    ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),
+    // Drafts in the owner's name need his token, and his DM to approve them.
+    draftForOwner: Boolean(userToken && ownerChannel),
+    ...(ownerChannel ? { ownerAddress: { connector: "slack", conversation: ownerChannel, thread: "main" } } : {}),
   },
 });
 

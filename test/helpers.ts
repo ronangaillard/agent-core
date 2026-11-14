@@ -17,7 +17,7 @@ export const config: CoreConfig = {
   backoffMs: [30, 60],
   maxRetryAgeMs: 60_000,
   deliverTimeoutMs: 200,
-  alertAddress: { connector: "fake", conversation: "owner", thread: "main" },
+  ownerAddress: { connector: "fake", conversation: "owner", thread: "main" },
 };
 
 /** The outside world, shared by successive cores: what was said in each thread. */
@@ -25,7 +25,7 @@ export class World {
   readonly threads = new Map<string, ThreadMessage[]>();
   private next = 0;
 
-  say(text: string, options: { thread?: string; author?: string; kind?: InboxRow["author_kind"]; dm?: boolean; mention?: boolean; ownerOnly?: boolean } = {}): InboxRow {
+  say(text: string, options: { thread?: string; author?: string; kind?: InboxRow["author_kind"]; dm?: boolean; mention?: boolean; mentionsOwner?: boolean; ownerOnly?: boolean } = {}): InboxRow {
     const thread = options.thread ?? "t1";
     const at = new Date(Date.now() + this.next).toISOString();
     const id = ++this.next;
@@ -43,9 +43,10 @@ export class World {
       private: true,
       dm: options.dm ?? true,
       mentions_agent: options.mention ?? false,
-      mentions_owner: false,
+      mentions_owner: options.mentionsOwner ?? false,
       sent_at: at,
       payload: { text },
+      text,
     };
   }
 }
@@ -93,13 +94,19 @@ export class FakeConnector implements Connector {
   async read(address: Address) {
     return { label: "test", messages: [...(this.world.threads.get(address.conversation) ?? [])] };
   }
+  /** Set: every reply waits for the owner, with this note. */
+  holdWith: string | undefined;
   form = {
     schema: () => z.object({ messages: z.array(z.string()) }),
     guide: (_row: InboxRow, scope: Scope) => {
       this.scopes.push(scope);
       return "Answer.";
     },
-    toPosts: (output: unknown) => ({ posts: (output as { messages: string[] }).messages.map((text): Post => ({ text })), held: false }),
+    toPosts: (output: unknown) => ({
+      posts: (output as { messages: string[] }).messages.map((text): Post => ({ text })),
+      held: this.holdWith !== undefined,
+      ...(this.holdWith ? { note: this.holdWith } : {}),
+    }),
   };
   async deliver(address: Address, post: Post): Promise<DeliverResult> {
     if (this.deliverImpl) return this.deliverImpl(address, post);

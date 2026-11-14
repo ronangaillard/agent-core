@@ -32,11 +32,14 @@ export type InboxRow = {
   /** ISO: the core compares dates, never connector ids. */
   sent_at: string;
   payload: unknown;
+  /** The plain text, when there is one: only the owner's commands read it. */
+  text?: string;
   caught_up?: boolean;
 };
 
 export type Post =
-  | { text: string }
+  /** as "owner": posted in the owner's name (a draft he validated). */
+  | { text: string; as?: "owner" }
   | { gif: string }
   | { text: string; buttons: string[] }
   | { reaction: string }
@@ -57,7 +60,8 @@ export type Scope = { owner: boolean; requester: string; private: boolean };
 export type Form = {
   schema(row: InboxRow, scope: Scope): z.ZodType;
   guide(row: InboxRow, scope: Scope): string;
-  toPosts(output: unknown): { posts: Post[]; held: boolean };
+  /** held: the posts wait for the owner; note: what he reads to decide (what it answers, why it waits). */
+  toPosts(output: unknown): { posts: Post[]; held: boolean; note?: string };
 };
 
 export interface Connector {
