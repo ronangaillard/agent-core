@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -188,4 +188,23 @@ test("digest and search: a private conversation never comes up elsewhere, except
   const context = { scope: colleague, threadKey: "fake:here", lotIds: [], connector: "fake", address: { connector: "fake", conversation: "here", thread: "main" } };
   assert.match(await search!.run({ keywords: "topic" }, context), /public topic/);
   assert.equal(await search!.run({ keywords: "secret" }, context), "Nothing found.");
+});
+
+test("shelves: read-only folders anyone reads through the memory tools, never written, never in the prompt", () => {
+  const code = mkdtempSync(join(tmpdir(), "code-"));
+  mkdirSync(join(code, "connectors"));
+  writeFileSync(join(code, "core.ts"), "export class Core {}");
+  writeFileSync(join(code, "connectors", "slack.ts"), "slack");
+  writeFileSync(join(code, "INDEX.md"), "never in the prompt");
+  const secret = mkdtempSync(join(tmpdir(), "secret-"));
+  writeFileSync(join(secret, "token"), "s3cret");
+  symlinkSync(secret, join(code, "escape"));
+  const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")), { code });
+  assert.equal(memory.read("code/core.ts", colleague), "export class Core {}");
+  assert.ok(memory.list(colleague).includes("code/connectors/slack.ts"));
+  assert.throws(() => memory.write("code/core.ts", "hacked", owner), /read-only/);
+  assert.throws(() => memory.read("code/../../etc/passwd", colleague), /not readable|outside/);
+  assert.throws(() => memory.read("code/escape/token", colleague), /outside/);
+  assert.doesNotMatch(memory.index(owner), /never in the prompt/);
+  assert.throws(() => new Memory(mkdtempSync(join(tmpdir(), "memory-")), { private: code }), /not a valid name/);
 });

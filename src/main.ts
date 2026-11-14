@@ -64,7 +64,9 @@ const runner =
     : undefined;
 
 const db = openDb(process.env.AGENT_DB ?? "data/agent.db");
-const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory");
+/** AGENT_SHELVES: read-only folders the memory tools also read, e.g. {"code":"/app/src"} (the agent's own source). */
+const shelves = JSON.parse(process.env.AGENT_SHELVES ?? "{}") as Record<string, string>;
+const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves);
 
 const core = new Core({
   db,

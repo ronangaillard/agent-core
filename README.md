@@ -27,7 +27,7 @@ tokens come from the environment.
 | `src/act.ts` | The tools that act: `send`, `set_reminder`, `list_reminders`, `cancel_reminder` |
 | `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
-| `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private |
+| `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves |
 | `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
@@ -50,7 +50,9 @@ Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `A
 DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
 `AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
-`{"channel": "C…", "rules": ["all"]}`, owner-only by default).
+`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_SHELVES` (JSON, name → folder: read-only
+folders the memory tools also read, for everyone, never written nor put in the prompt; e.g. `{"code":"/app/src"}`
+lets the agent read its own source, the version running).
 
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
