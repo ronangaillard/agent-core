@@ -132,14 +132,21 @@ test("e-mail: Svix signature, who is read, the owner's scope only when he is alo
 
   const connector = emailConnector(options);
   const paul = (await connector.toInbox(mail()))!;
-  assert.equal(paul.thread_key, "email:budget 2027");
+  assert.equal(paul.thread_key, "email:m1@acme.fr");
   assert.equal(paul.author_id, "paul@acme.fr");
   assert.equal(paul.owner_only, false);
-  assert.equal(paul.text, "Hi,");
+  // The thread is the mail that started it, not the subject: same subject from someone else, another conversation.
+  const reply = (await connector.toInbox(mail({ id: "r2", message_id: "<m2@acme.fr>", headers: { References: "<m1@acme.fr> <x@acme.fr>" } })))!;
+  assert.equal(reply.thread_key, "email:m1@acme.fr");
+  const other = (await connector.toInbox(mail({ id: "r3", from: "ines@acme.fr", message_id: "<m3@acme.fr>" })))!;
+  assert.notEqual(other.thread_key, paul.thread_key);
+  // A Reply-To outside the allowed domains is not followed.
+  assert.equal((await connector.toInbox(mail({ reply_to: ["drop@evil.com"] })))!.address.conversation, "paul@acme.fr");
+  assert.match(rejectionOf(mail({ from: "x@acme.fr@evil.com" }), options)!, /domains/);
   const alone = (await connector.toInbox(mail({ from: "ronan@acme.fr", text: "send 12" })))!;
   assert.equal(alone.author_id, "U_RONAN");
   assert.equal(alone.owner_only, true);
-  assert.equal(alone.text, "send 12");
+  assert.equal(alone.text, undefined, "no owner command by e-mail: DMARC vouches for a domain, not a mailbox");
   const copied = (await connector.toInbox(mail({ from: "ronan@acme.fr", cc: ["paul@acme.fr"] })))!;
   assert.equal(copied.owner_only, false);
   assert.equal(await connector.toInbox(mail({ authentication: null })), null);

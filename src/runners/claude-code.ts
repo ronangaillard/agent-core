@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createSdkMcpServer, query, tool, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -13,6 +13,10 @@ const exec = promisify(execFile);
 export type ClaudeCodeOptions = {
   /** Where the copies live, one per task. The session writes nowhere else. */
   workspace: string;
+  /** This process's own bare repositories, one per task: the session can neither write nor read them. */
+  vault?: string;
+  /** More paths the session's terminal must not read (the agent's own folder and home are always denied). */
+  denyRead?: string[];
   /** Used by this process only (clone, push, PR): never in the copy, never in the session's environment. */
   githubToken: string;
   /** The agent, as the session's system prompt starts. */
@@ -31,30 +35,55 @@ const REGISTRIES = ["registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "f
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS"]);
 const SERVER = "task";
 
-/** git with the token in a header of this one command: it is never written in the copy's config. */
+/** No hook, no fsmonitor, whatever a repository's config says. */
+const SAFE = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=always"];
+const UPLOAD_PACK = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false upload-pack";
+
+/**
+ * git run by this process: a scrubbed environment (none of the agent's secrets), and the token, when needed, in a
+ * header of this one command. Never run in the copy: the session writes there, its config and hooks are not trusted.
+ */
 function git(args: string[], options: { cwd?: string; token?: string } = {}) {
   const auth = options.token ? ["-c", `http.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`] : [];
-  return exec("git", [...auth, ...args], { cwd: options.cwd, maxBuffer: 10_000_000 }).then((r) => r.stdout.trim());
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1" };
+  for (const key of ["PATH", "HOME", "LANG"]) if (process.env[key]) env[key] = process.env[key]!;
+  return exec("git", [...SAFE, ...auth, ...args], { cwd: options.cwd, env, maxBuffer: 10_000_000 }).then((r) => r.stdout.trim());
 }
 
-/** The task's copy: cloned once, on its branch (from the remote one if it exists), kept for the next runs. */
-export async function prepareCopy(dir: string, remote: string, branch: string, token: string) {
+/** The copy's branch, brought into the vault: a fetch from the copy, which runs no code of the copy's. */
+async function syncFromCopy(vault: string, dir: string, branch: string) {
+  await git(["fetch", "--quiet", "--no-tags", `--upload-pack=${UPLOAD_PACK}`, dir, `+refs/heads/${branch}:refs/heads/${branch}`], { cwd: vault });
+}
+
+/**
+ * The task's copy, cloned once from the vault (a bare repository this process owns, fed from the remote), on its
+ * branch, kept for the next runs. The copy holds no token and no link to the remote. Returns the branch's last commits.
+ */
+export async function prepareCopy(dir: string, vault: string, remote: string, branch: string, token: string) {
+  if (!existsSync(join(vault, "HEAD"))) {
+    rmSync(vault, { recursive: true, force: true });
+    mkdirSync(vault, { recursive: true });
+    await git(["clone", "--quiet", "--bare", remote, vault], { token });
+  }
   if (!existsSync(join(dir, ".git"))) {
-    // A clone cut halfway leaves no .git: start over.
+    // A clone cut halfway leaves no .git: start over, from what the remote holds now.
+    await git(["fetch", "--quiet", "--no-tags", remote, "+refs/heads/*:refs/heads/*"], { cwd: vault, token });
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
-    await git(["clone", "--quiet", remote, dir], { token });
+    // --no-local: copied, not hard-linked, so the session cannot reach the vault's objects through its own.
+    await git(["clone", "--quiet", "--no-local", vault, dir]);
     const pushed = await git(["branch", "-r", "--list", `origin/${branch}`], { cwd: dir });
     await git(["checkout", "--quiet", "-B", branch, ...(pushed ? [`origin/${branch}`] : [])], { cwd: dir });
+  } else {
+    await syncFromCopy(vault, dir, branch).catch(() => undefined);
   }
-  return git(["log", "--oneline", "-5"], { cwd: dir });
+  return git(["log", "--oneline", "-5", `refs/heads/${branch}`], { cwd: vault }).catch(() => "");
 }
 
-/** Only the task's branch, never anything else. */
-export async function pushBranch(dir: string, branch: string, token: string) {
-  const current = await git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir });
-  if (current !== branch) throw new Error(`the copy is on ${current}, not on the task's branch ${branch}`);
-  await git(["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { cwd: dir, token });
+/** Only the task's branch, from the vault, to the remote named here: nothing in the copy decides where it goes. */
+export async function pushBranch(dir: string, vault: string, remote: string, branch: string, token: string) {
+  await syncFromCopy(vault, dir, branch);
+  await git(["push", "--quiet", remote, `refs/heads/${branch}:refs/heads/${branch}`], { cwd: vault, token });
 }
 
 /** The terminal sees none of the agent's secrets. */
@@ -78,6 +107,7 @@ const resultSchema = z.object({ report: z.string().describe("Your report, short,
  */
 export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
   const workspace = resolve(options.workspace);
+  const vaults = resolve(options.vault ?? `${workspace}-vault`);
   const base = options.gitBase ?? "https://github.com";
 
   async function github<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -93,8 +123,9 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
   return async (run: TaskRun): Promise<TaskOutcome> => {
     const { task } = run;
     const dir = join(workspace, `task-${task.id}`);
-    const log = await prepareCopy(dir, `${base}/${task.repo}.git`, task.branch, options.githubToken);
-    const status = await git(["status", "--short"], { cwd: dir });
+    const vault = join(vaults, `task-${task.id}.git`);
+    const remote = `${base}/${task.repo}.git`;
+    const log = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
     let pr = task.pr;
 
     const server = createSdkMcpServer({
@@ -106,7 +137,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           return { content: [{ type: "text" as const, text: "Noted." }] };
         }),
         tool("push_branch", `Push the copy's commits to the task's branch (${task.branch}). Commit first.`, {}, async () => {
-          await pushBranch(dir, task.branch, options.githubToken);
+          await pushBranch(dir, vault, remote, task.branch, options.githubToken);
           return { content: [{ type: "text" as const, text: `Pushed to ${task.branch}.` }] };
         }),
         tool("open_pr", "Open the task's pull request (one per task; it already exists after the first time). Push first.", { title: z.string(), body: z.string() }, async ({ title, body }) => {
@@ -123,12 +154,13 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
       ],
     });
 
-    // File tools inside the copy only; the terminal is bounded by the sandbox; the task's own tools; nothing else.
+    // File tools inside the copy only, never its .git; the terminal is bounded by the sandbox; the task's own tools.
     const canUseTool: CanUseTool = async (name, input) => {
       if (name.startsWith(`mcp__${SERVER}__`)) return { behavior: "allow", updatedInput: input };
       if (FILE_TOOLS.has(name)) {
         const path = resolve(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."));
-        if (path === dir || path.startsWith(dir + sep)) return { behavior: "allow", updatedInput: input };
+        const inside = path === dir || path.startsWith(dir + sep);
+        if (inside && !relative(dir, path).split(sep).includes(".git")) return { behavior: "allow", updatedInput: input };
       }
       return { behavior: "deny", message: `${name} is not allowed in a code task: do without, or say what you are missing in your report.` };
     };
@@ -144,7 +176,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           run.resumed ? "A restart cut your previous run of this task: the copy may hold your work in progress, look at it first." : "",
           `Request (task #${task.id}, "${task.title}", ${task.repo}):\n<request>\n${run.request}\n</request>`,
           `The conversation it comes from:\n<conversation>\n${run.conversation || "(none)"}\n</conversation>`,
-          `The copy (${dir}), on branch ${task.branch}${pr ? `, PR #${pr} open` : ""}:\n<git>\n${log}\n${status}\n</git>`,
+          `The copy (${dir}), on branch ${task.branch}${pr ? `, PR #${pr} open` : ""}, last commits:\n<git>\n${log || "(none yet)"}\n</git>`,
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -164,7 +196,13 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
             autoAllowBashIfSandboxed: true,
             allowUnsandboxedCommands: false,
             network: { allowedDomains: options.allowedDomains ?? REGISTRIES },
-            filesystem: { allowWrite: [dir], denyRead: [homedir()], allowRead: [dir] },
+            // Writes in the copy only, never its git config or hooks; reads nothing of the agent's (its folder, its home).
+            filesystem: {
+              allowWrite: [dir],
+              denyWrite: [join(dir, ".git", "config"), join(dir, ".git", "hooks")],
+              denyRead: [homedir(), process.cwd(), vaults, ...(options.denyRead ?? [])],
+              allowRead: [dir],
+            },
           },
           settingSources: [],
           persistSession: false,

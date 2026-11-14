@@ -93,27 +93,30 @@ test("reminder: at most 5 per conversation, and only that conversation's can be 
   core.kill();
 });
 
-test("send: idempotent within a lot, and an ambiguous failure is never retried", async () => {
+test("send: once per place per lot, even reworded, and an ambiguous failure is never retried", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
-  const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team } });
+  const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team, board } });
   assert.equal(await core.send(context(owner), "team", "deploy at 5"), "Sent.");
-  assert.match(await core.send(context(owner), "team", "deploy at 5"), /Already sent/);
+  // A re-run of the same lot rewords it: still one post.
+  assert.match(await core.send(context(owner), "team", "Deploy is at 5 pm"), /Already sent/);
   assert.equal(textsIn(connector, "team").length, 1);
   assert.deepEqual(core.store.acted("fake:t1"), ['sent to team: "deploy at 5"']);
+  assert.equal(await core.send(context(owner), "board", "deploy at 5"), "Sent.", "another place is another send");
+  assert.equal(await core.send(context(owner, "t1", 2), "team", "next lot"), "Sent.", "another lot is another send");
 
   connector.deliverImpl = async () => {
     throw new Error("socket hang up");
   };
-  assert.match(await core.send(context(owner), "team", "second"), /Status unknown/);
+  assert.match(await core.send(context(owner, "t1", 3), "team", "second"), /Status unknown/);
   connector.deliverImpl = undefined;
-  assert.match(await core.send(context(owner), "team", "second"), /Already sent/);
-  assert.equal(textsIn(connector, "team").length, 1);
+  assert.match(await core.send(context(owner, "t1", 3), "team", "second"), /Already sent/);
+  assert.equal(textsIn(connector, "team").length, 2);
 
   connector.deliverImpl = async () => ({ ok: false, transient: false, error: "channel_not_found" });
-  assert.match(await core.send(context(owner), "team", "third"), /Not sent: channel_not_found/);
+  assert.match(await core.send(context(owner, "t1", 4), "team", "third"), /Not sent: channel_not_found/);
   connector.deliverImpl = undefined;
-  assert.equal(await core.send(context(owner), "team", "third"), "Sent.");
+  assert.equal(await core.send(context(owner, "t1", 4), "team", "third"), "Sent.");
   core.kill();
 });
 

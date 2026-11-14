@@ -7,7 +7,8 @@ const INDEX_MAX = 4000;
 
 /**
  * The agent's memory, in Markdown files: common/ comes up in every conversation, private/ only in the owner's private
- * one. Each folder has an INDEX.md put in the prompt; the rest is read on demand with the tools.
+ * one. Each folder has an INDEX.md put in the prompt; the rest is read on demand with the tools. Only the owner's
+ * conversation writes it: nobody else can plant an instruction that every prompt would then carry.
  */
 export class Memory {
   constructor(readonly root: string) {
@@ -46,7 +47,9 @@ export class Memory {
     return existsSync(file) ? readFileSync(file, "utf8") : "";
   }
 
+  /** Only the owner writes: what is in memory comes up in every prompt, his private one included, as trusted. */
   write(path: string, content: string, scope: Scope) {
+    if (!scope.owner) throw new Error(`${path}: only the owner's conversation writes the memory`);
     const file = this.resolve(path, scope);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, content);
@@ -80,7 +83,8 @@ export class Memory {
         description:
           "Write a memory file (whole content). common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
         input: { path: z.string(), content: z.string() },
-        rules: ["all"],
+        rules: ["owner"],
+        effect: true,
         run: async (args, { scope }) => {
           this.write(String(args.path), String(args.content), scope);
           return "written";

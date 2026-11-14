@@ -42,7 +42,20 @@ export function parseAddress(value: string) {
   return match ? { name: match[1]!.trim(), address: match[2]!.trim().toLowerCase() } : { name: "", address: value.trim().toLowerCase() };
 }
 
-/** The subject without "Re:", "Fwd:": what ties the e-mails of one thread. */
+/** The domain: after the last @. */
+const domainOf = (address: string) => address.slice(address.lastIndexOf("@") + 1);
+
+/**
+ * The thread: the first Message-ID of References (the mail that started it), else In-Reply-To, else this mail's own.
+ * Two people writing with the same subject are two conversations; the agent's replies keep References, so an answer
+ * to it stays in the thread.
+ */
+export function threadRoot(email: Received): string {
+  const references = header(email, "references")?.match(/<[^>]+>/g);
+  return (references?.[0] ?? header(email, "in-reply-to")?.match(/<[^>]+>/)?.[0] ?? email.message_id ?? header(email, "message-id") ?? email.id).replace(/[<>]/g, "");
+}
+
+/** The subject without "Re:", "Fwd:", for reading. */
 export const subjectKey = (subject: string) =>
   subject
     .replace(/^((re|tr|fwd?)\s*:\s*)+/i, "")
@@ -64,7 +77,9 @@ const htmlToText = (html: string) =>
     .trim();
 
 const bodyOf = (email: Received) => (email.text || (email.html ? htmlToText(email.html) : "")).trim();
-const header = (email: Received, name: string) => Object.entries(email.headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1];
+function header(email: Received, name: string): string | undefined {
+  return Object.entries(email.headers ?? {}).find(([key]) => key.toLowerCase() === name)?.[1];
+}
 
 /** Resend signs its webhooks the Svix way: HMAC-SHA256 of "id.timestamp.body", within five minutes. */
 export function svixOk(secret: string, headers: { id?: string; timestamp?: string; signature?: string }, body: string, now = Date.now()): boolean {
@@ -82,7 +97,7 @@ export function svixOk(secret: string, headers: { id?: string; timestamp?: strin
 export function rejectionOf(email: Received, options: Pick<EmailOptions, "address" | "allowedDomains">): string | undefined {
   const from = parseAddress(email.from).address;
   if (from === options.address.toLowerCase()) return "from the agent itself";
-  if (!options.allowedDomains.includes(from.split("@")[1] ?? "")) return "sender outside the allowed domains";
+  if (!options.allowedDomains.includes(domainOf(from))) return "sender outside the allowed domains";
   if (email.authentication?.dmarc !== "pass") return "DMARC not passing (the sender may be spoofed)";
   return undefined;
 }
@@ -101,7 +116,8 @@ export function emailConnector(options: EmailOptions): Connector {
     const response = await fetch(`${API}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
-      signal: AbortSignal.timeout(20_000),
+      // Two calls at most per delivery, both under the core's delivery timeout.
+      signal: AbortSignal.timeout(12_000),
     });
     const body = await response.text();
     if (!response.ok) throw Object.assign(new Error(`Resend ${init.method ?? "GET"} ${path}: HTTP ${response.status} ${body.slice(0, 300)}`), { status: response.status });
@@ -116,7 +132,12 @@ export function emailConnector(options: EmailOptions): Connector {
     async start(sink) {
       server = createServer((request, response) => {
         const chunks: Buffer[] = [];
-        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        let size = 0;
+        request.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > 1_000_000) request.destroy();
+          else chunks.push(chunk);
+        });
         request.on("end", () => {
           const body = Buffer.concat(chunks).toString("utf8");
           const headers = { id: request.headers["svix-id"] as string, timestamp: request.headers["svix-timestamp"] as string, signature: request.headers["svix-signature"] as string };
@@ -151,8 +172,17 @@ export function emailConnector(options: EmailOptions): Connector {
 
     /** What arrived while the agent was down: the webhook is not replayed forever. */
     async *catchUp(since) {
-      const list = await resend<{ data: { id: string; created_at: string }[] }>("/emails/receiving?limit=100");
-      for (const summary of list.data.filter((e) => e.created_at >= since).reverse()) yield await received(summary.id);
+      // Newest first, page after page, down to the cursor; then read oldest first.
+      const ids: string[] = [];
+      let after: string | undefined;
+      for (;;) {
+        const page = await resend<{ data: { id: string; created_at: string }[]; has_more?: boolean }>(`/emails/receiving?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+        const recent = page.data.filter((e) => e.created_at >= since);
+        ids.push(...recent.map((e) => e.id));
+        if (!page.has_more || recent.length < page.data.length || !page.data.length) break;
+        after = page.data[page.data.length - 1]!.id;
+      }
+      for (const id of ids.reverse()) yield await received(id);
     },
 
     async toInbox(raw): Promise<InboxRow | null> {
@@ -167,8 +197,10 @@ export function emailConnector(options: EmailOptions): Connector {
       // Only the owner and the agent on it: his private conversation. Anyone else in copy, and it is not.
       const others = [...(email.to ?? []), ...(email.cc ?? [])].map((a) => parseAddress(a).address).filter((a) => a && a !== self && !owners.includes(a));
       const subject = email.subject || "(no subject)";
-      const thread = subjectKey(subject);
-      const replyTo = email.reply_to?.[0] ? parseAddress(email.reply_to[0]).address : from;
+      const thread = threadRoot(email);
+      // A Reply-To outside the allowed domains is not followed: the reply goes to the sender.
+      const asked = email.reply_to?.[0] ? parseAddress(email.reply_to[0]).address : "";
+      const replyTo = asked && options.allowedDomains.includes(domainOf(asked)) ? asked : from;
       return {
         source_id: `email:${email.message_id ?? header(email, "message-id") ?? email.id}`,
         address: { connector: "email", conversation: replyTo, thread, ts: email.id },
@@ -183,7 +215,6 @@ export function emailConnector(options: EmailOptions): Connector {
         mentions_owner: false,
         sent_at: email.created_at,
         payload: { id: email.id, from: email.from, subject },
-        text: bodyOf(email).split("\n").find((line) => line.trim())?.trim() ?? "",
       };
     },
 
@@ -203,7 +234,7 @@ export function emailConnector(options: EmailOptions): Connector {
     /** An address in an allowed domain. */
     async resolve(person) {
       const address = parseAddress(person).address;
-      return /^[^@\s]+@[^@\s]+$/.test(address) && options.allowedDomains.includes(address.split("@")[1] ?? "")
+      return /^[^@\s]+@[^@\s]+$/.test(address) && options.allowedDomains.includes(domainOf(address))
         ? { connector: "email", conversation: address, thread: `to:${address}` }
         : null;
     },

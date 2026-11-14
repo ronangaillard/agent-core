@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -82,7 +82,7 @@ test("code task: continued from elsewhere it reports where it was asked; a priva
   core.kill();
 });
 
-test("code task: a running task is changed only by its requester or the owner; a replaced run says nothing", async () => {
+test("code task: changed by its requester, the owner or in its own conversation, not taken over from elsewhere; a replaced run says nothing", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
   const { runner, runs, release } = fakeRunner(false);
@@ -90,7 +90,7 @@ test("code task: a running task is changed only by its requester or the owner; a
   await core.start();
   await core.startTask(context(paul, "a"), { request: "first", fresh: false });
   await waitFor(() => runs.length === 1);
-  assert.match(await core.startTask(context(ines, "a"), { request: "hijack", fresh: false }), /running for someone else/);
+  assert.match(await core.startTask(context(ines, "b"), { request: "hijack", task: 1, fresh: false }), /asked by someone else/);
   await core.startTask(context(paul, "a"), { request: "second", fresh: false });
   await waitFor(() => runs.length === 2);
   release[1]!();
@@ -151,7 +151,7 @@ test("code task: progress notes are capped, a failure is reported, and <in_progr
   core.kill();
 });
 
-test("runner: the copy is cloned on the task's branch, and only that branch is pushed", async () => {
+test("runner: the copy is cloned on the task's branch; only that branch is pushed, and nothing in the copy runs or redirects it", async () => {
   const root = mkdtempSync(join(tmpdir(), "agent-git-"));
   const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString().trim();
   const bare = join(root, "origin.git");
@@ -164,19 +164,31 @@ test("runner: the copy is cloned on the task's branch, and only that branch is p
   run(seed, "push", "--quiet", "origin", "HEAD:main");
 
   const copy = join(root, "task-1");
-  await prepareCopy(copy, bare, "agent/1-x", "token");
+  const vault = join(root, "vault", "task-1.git");
+  await prepareCopy(copy, vault, bare, "agent/1-x", "token");
   assert.equal(run(copy, "rev-parse", "--abbrev-ref", "HEAD"), "agent/1-x");
+  assert.notEqual(run(copy, "remote", "get-url", "origin"), bare, "the copy has no link to the remote");
   writeFileSync(join(copy, "feature.txt"), "x\n");
   run(copy, "add", ".");
   run(copy, "commit", "--quiet", "-m", "feature");
-  await pushBranch(copy, "agent/1-x", "token");
+
+  // A hostile copy: a hook that would run on push, an origin pointing elsewhere.
+  const marker = join(root, "hook-ran");
+  writeFileSync(join(copy, ".git", "hooks", "pre-push"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+  writeFileSync(join(copy, ".git", "hooks", "upload-pack"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+  const elsewhere = join(root, "elsewhere.git");
+  run(root, "init", "--quiet", "--bare", elsewhere);
+  run(copy, "remote", "set-url", "origin", elsewhere);
+  run(copy, "config", "core.fsmonitor", `touch ${marker}`);
+
+  await pushBranch(copy, vault, bare, "agent/1-x", "token");
   assert.match(run(bare, "branch", "--list"), /agent\/1-x/);
+  assert.equal(run(elsewhere, "branch", "--list"), "");
+  assert.equal(existsSync(marker), false, "no code of the copy ran");
   assert.throws(() => run(copy, "config", "--get", "http.extraheader"), "the token is never written");
 
-  // A copy made again (another machine, a wiped workspace) starts from the pushed branch.
+  // A copy made again (a wiped workspace) starts from the pushed branch.
   const again = join(root, "task-1-again");
-  await prepareCopy(again, bare, "agent/1-x", "token");
+  await prepareCopy(again, join(root, "vault", "again.git"), bare, "agent/1-x", "token");
   assert.match(run(again, "log", "--oneline", "-1"), /feature/);
-  run(copy, "checkout", "--quiet", "main");
-  await assert.rejects(() => pushBranch(copy, "agent/1-x", "token"), /not on the task's branch/);
 });

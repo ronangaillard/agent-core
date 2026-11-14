@@ -143,7 +143,18 @@ const placeholders = (ids: number[]) => ids.map(() => "?").join(",");
 
 /** Every read and write of the three tables. Each status change and its event go in one transaction. */
 export class Store {
+  /** Where alerts go (the owner's line), written in the same transaction as what raised them. */
+  alertTo: { address: Address; threadKey: string } | undefined;
+
   constructor(readonly db: DatabaseSync) {}
+
+  private insertAlert(text: string | undefined) {
+    if (!text || !this.alertTo) return;
+    const { address, threadKey } = this.alertTo;
+    this.db
+      .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('alert', NULL, ?, ?, ?, ?, 'pending', ?)")
+      .run(threadKey, address.connector, JSON.stringify(address), JSON.stringify({ text }), now());
+  }
 
   private event(e: { kind: string; thread_key?: string | null; author_id?: string | null; author_kind?: string | null; private?: boolean; payload?: unknown; ref?: number | null }) {
     this.db
@@ -205,7 +216,10 @@ export class Store {
       if (!first) return false;
       if (text !== undefined) {
         this.db.prepare("UPDATE outbox SET payload = ? WHERE id = ?").run(JSON.stringify({ ...first.payload, text }), first.id);
-        for (const row of rest) this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'edited' WHERE id = ?").run(row.id);
+        for (const row of rest) {
+          this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'edited' WHERE id = ?").run(row.id);
+          this.event({ kind: "dead", thread_key: row.thread_key, ref: row.id, payload: { reason: "edited" } });
+        }
       }
       this.db.prepare("UPDATE outbox SET status = 'pending' WHERE batch_id = ? AND status = 'held'").run(batch);
       this.event({ kind: "released", thread_key: first.thread_key, ref: batch, payload: text === undefined ? undefined : { edited: true } });
@@ -215,9 +229,12 @@ export class Store {
 
   discard(batch: number): boolean {
     return tx(this.db, () => {
-      const changes = this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'dropped' WHERE batch_id = ? AND status = 'held'").run(batch).changes;
-      if (changes > 0) this.event({ kind: "dropped", ref: batch });
-      return changes > 0;
+      const rows = (this.db.prepare("SELECT * FROM outbox WHERE batch_id = ? AND status = 'held'").all(batch) as Row[]).map(outboxOf);
+      for (const row of rows) {
+        this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'dropped' WHERE id = ?").run(row.id);
+        this.event({ kind: "dead", thread_key: row.thread_key, ref: row.id, payload: { reason: "dropped" } });
+      }
+      return rows.length > 0;
     });
   }
 
@@ -422,11 +439,16 @@ export class Store {
     this.db.prepare(`UPDATE inbox SET attempts = MAX(attempts - 1, 0) WHERE id IN (${placeholders(ids)}) AND status = 'pending'`).run(...ids);
   }
 
+  /** A failure that counts (the attempt stays): not retried before this date, so a failing thread never spins. */
+  delay(ids: number[], at: string) {
+    this.db.prepare(`UPDATE inbox SET next_attempt_at = ? WHERE id IN (${placeholders(ids)}) AND status = 'pending'`).run(at, ...ids);
+  }
+
   /** Transient failure: back to pending later, the attempt given back, the retry counted for the backoff. */
-  defer(ids: number[], at: string) {
+  defer(ids: number[], at: string, counted = true) {
     this.db
-      .prepare(`UPDATE inbox SET attempts = MAX(attempts - 1, 0), retries = retries + 1, next_attempt_at = ? WHERE id IN (${placeholders(ids)}) AND status = 'pending'`)
-      .run(at, ...ids);
+      .prepare(`UPDATE inbox SET attempts = MAX(attempts - ?, 0), retries = retries + 1, next_attempt_at = ? WHERE id IN (${placeholders(ids)}) AND status = 'pending'`)
+      .run(counted ? 1 : 0, at, ...ids);
   }
 
   close(row: InboxRecord, outcome: string, payload?: unknown) {
@@ -436,10 +458,11 @@ export class Store {
     });
   }
 
-  fail(row: InboxRecord, reason: string) {
+  fail(row: InboxRecord, reason: string, alert?: string) {
     tx(this.db, () => {
       this.db.prepare("UPDATE inbox SET status = 'failed', outcome = ?, handled_at = ? WHERE id = ?").run(reason, now(), row.id);
       this.event({ kind: "failed", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id, payload: { reason } });
+      this.insertAlert(alert);
     });
   }
 
@@ -451,7 +474,7 @@ export class Store {
     lot: InboxRecord[],
     posts: Post[],
     held: boolean,
-    readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean },
+    readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean; held?: boolean },
     options: { outcome?: string; notice?: { address: Address; text: string } } = {},
   ) {
     const last = lot[lot.length - 1]!;
@@ -536,15 +559,27 @@ export class Store {
   }
 
   /** The newest message received from a connector: the catch-up cursor. */
+  /** Up to when everything from this connector is known to be in the inbox. */
+  cursor(connector: string): string | undefined {
+    const row = this.db.prepare("SELECT at FROM cursors WHERE connector = ?").get(connector) as Row | undefined;
+    return row ? String(row.at) : (this.lastSourceAt(connector) ?? undefined);
+  }
+
+  /** Only forward. */
+  setCursor(connector: string, at: string) {
+    this.db.prepare("INSERT INTO cursors (connector, at) VALUES (?, ?) ON CONFLICT(connector) DO UPDATE SET at = MAX(at, excluded.at)").run(connector, at);
+  }
+
   lastSourceAt(connector: string): string | undefined {
     const row = this.db.prepare("SELECT MAX(sent_at) AS at FROM inbox WHERE connector = ? AND author_kind != 'system'").get(connector) as Row;
     return row.at === null ? undefined : String(row.at);
   }
 
   /** The readable exchanges since a date, newest first: what the digest and the search read. */
-  exchanges(since: string, limit = 500): { at: string; thread_key: string; author_id: string; private: boolean; payload: Record<string, unknown> }[] {
+  exchanges(since: string, limit = 500): { at: string; ref: number | null; thread_key: string; author_id: string; private: boolean; payload: Record<string, unknown> }[] {
     return (this.db.prepare("SELECT * FROM events WHERE kind IN ('drafted', 'silent') AND at >= ? ORDER BY id DESC LIMIT ?").all(since, limit) as Row[]).map((r) => ({
       at: String(r.at),
+      ref: r.ref === null ? null : Number(r.ref),
       thread_key: String(r.thread_key),
       author_id: String(r.author_id),
       private: Boolean(r.private),
@@ -587,7 +622,12 @@ export class Store {
 
   /** Before the call. false: someone else took it. */
   markDelivering(id: number): boolean {
-    return this.db.prepare("UPDATE outbox SET status = 'delivering' WHERE id = ? AND status = 'pending'").run(id).changes === 1;
+    return tx(this.db, () => {
+      const row = this.outbox(id);
+      if (!row || this.db.prepare("UPDATE outbox SET status = 'delivering' WHERE id = ? AND status = 'pending'").run(id).changes !== 1) return false;
+      this.event({ kind: "delivering", thread_key: row.thread_key, ref: id });
+      return true;
+    });
   }
 
   delivered(row: OutboxRecord, ref: string, sentAt: string) {
@@ -604,10 +644,12 @@ export class Store {
     });
   }
 
-  dead(row: OutboxRecord, reason: string) {
+  /** An alert never raises another one. */
+  dead(row: OutboxRecord, reason: string, alert?: string) {
     tx(this.db, () => {
       this.db.prepare("UPDATE outbox SET status = 'dead', reason = ? WHERE id = ?").run(reason, row.id);
       this.event({ kind: "dead", thread_key: row.thread_key, ref: row.id, payload: { reason } });
+      if (row.kind !== "alert") this.insertAlert(alert);
     });
   }
 

@@ -55,7 +55,8 @@ export function githubSource(core: Core, options: GithubOptions) {
       mentions_agent: false,
       mentions_owner: false,
       sent_at: status.created_at ?? new Date().toISOString(),
-      payload: { text },
+      payload: { deployment: deployment.id, state: status.state },
+      text,
     };
   };
 

@@ -20,7 +20,7 @@ test("a DM gets a reply, and every step leaves its event", async () => {
   await waitFor(() => core.store.events("fake:t1").some((e) => e.kind === "delivered"));
   assert.deepEqual(
     core.store.events("fake:t1").map((e) => e.kind),
-    ["received", "drafted", "delivered"],
+    ["received", "drafted", "delivering", "delivered"],
   );
   core.kill();
 });

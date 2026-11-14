@@ -104,6 +104,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS tasks_thread ON tasks (thread_key, status);
+
+CREATE TABLE IF NOT EXISTS cursors (
+  connector TEXT PRIMARY KEY,
+  at TEXT NOT NULL
+);
 `;
 
 export function openDb(path: string): DatabaseSync {

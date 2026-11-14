@@ -3,7 +3,7 @@ import { z } from "zod";
 import { TransientError, type Brain } from "./types.ts";
 
 /** Worth retrying later: overload, rate limit, network. Anything else counts as a failure. */
-const TRANSIENT = /overloaded|529|rate.?limit|429|\b50[0-4]\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up/i;
+const TRANSIENT = /overloaded|rate.?limit|(?:status|code|http|error)[^0-9]{0,12}\b(?:429|529|50[0-4])\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up/i;
 
 const classify = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

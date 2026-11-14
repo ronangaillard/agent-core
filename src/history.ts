@@ -9,6 +9,8 @@ type Exchange = ReturnType<Store["exchanges"]>[number];
  * again what he said in private himself (never the private conversations of others with the agent).
  */
 function visible(exchange: Exchange, scope: Scope, ownerId: string): boolean {
+  // What waits for the owner (a draft in his name, a held reply) is his alone, approved or not.
+  if (exchange.payload.for_owner || exchange.payload.held) return scope.owner;
   if (!exchange.private) return true;
   return scope.owner && exchange.author_id === ownerId;
 }
@@ -62,7 +64,8 @@ export function historyTools(store: Store, ownerId: string): ToolDef[] {
           const haystack = fold(`${exchange.payload.author ?? ""} ${exchange.payload.place ?? ""} ${exchange.payload.input ?? ""} ${exchange.payload.output ?? ""}`);
           if (person && !haystack.includes(person)) continue;
           if (!words.every((w) => haystack.includes(w))) continue;
-          found.push(`- ${exchange.at} ${exchange.payload.place ?? ""} [${exchange.thread_key}]: ${line(exchange, 300)}`);
+          // message:<id> lets the owner have the agent answer there (send).
+          found.push(`- ${exchange.at} ${exchange.payload.place ?? ""} [${exchange.thread_key}${exchange.ref ? `, message:${exchange.ref}` : ""}]: ${line(exchange, 300)}`);
         }
         return found.join("\n") || "Nothing found.";
       },

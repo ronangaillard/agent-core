@@ -65,7 +65,12 @@ export class FakeConnector implements Connector {
 
   constructor(private readonly world: World) {}
 
-  async start() {}
+  /** The core's sink, to push live events; and how many catch-ups fail before one works. */
+  sink: ((raw: unknown) => void) | undefined;
+  failingCatchUps = 0;
+  async start(sink: (raw: unknown) => void) {
+    this.sink = sink;
+  }
   onConnected(callback: () => void) {
     this.connected.push(callback);
   }
@@ -80,6 +85,10 @@ export class FakeConnector implements Connector {
   }
   async *catchUp(since: string) {
     this.catchUps.push(since);
+    if (this.failingCatchUps > 0) {
+      this.failingCatchUps--;
+      throw new Error("ratelimited");
+    }
     for (const row of this.missed) if (row.sent_at >= since) yield row;
   }
   threadKeyOf(address: Address) {

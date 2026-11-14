@@ -5,6 +5,8 @@ import type { Scope, ToolDef } from "./types.ts";
 
 /** One run of a code task, as the core hands it to the runner. */
 export type TaskRun = {
+  /** task.owner_asked: the owner asked (and every continuation too). A runner gives an owner-only capability (prod
+   * data, approving a PR) only then; the Claude Code runner has none. */
   task: TaskRecord;
   request: string;
   /** The conversation it was asked in, readable. */
@@ -69,6 +71,7 @@ export function taskTools(core: Core, repos: string[]): ToolDef[] {
         repo: z.string().optional().describe(`For a new task; default ${repos[0] ?? "none"}`),
       },
       rules: ["all"],
+      effect: true,
       run: (args, context) =>
         core.startTask(context, {
           request: String(args.request),

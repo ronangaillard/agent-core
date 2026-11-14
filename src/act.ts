@@ -16,6 +16,7 @@ export function actTools(core: Core): ToolDef[] {
         "The owner may also name a person (direct message) or message:<id> (the thread of that message). One call per message; never call again after 'Status unknown'.",
       input: { to: z.string().describe("A destination, a person, or message:<id>"), text: z.string().min(1) },
       rules: ["all"],
+      effect: true,
       run: (args, context) => core.send(context, String(args.to), String(args.text)),
     },
     {
@@ -27,6 +28,7 @@ export function actTools(core: Core): ToolDef[] {
         note: z.string().min(1),
       },
       rules: ["all"],
+      effect: true,
       run: async (args, context) => {
         const at = Date.parse(String(args.at));
         if (Number.isNaN(at)) return "Invalid date: give an ISO 8601 date-time with its offset.";
@@ -50,6 +52,7 @@ export function actTools(core: Core): ToolDef[] {
       description: "Cancel a reminder of this conversation.",
       input: { id: z.number().int() },
       rules: ["all"],
+      effect: true,
       run: async (args, { threadKey }) => (core.store.cancelReminder(Number(args.id), threadKey) ? "Cancelled." : "No such reminder here."),
     },
   ];

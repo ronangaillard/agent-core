@@ -32,18 +32,14 @@ export type InboxRow = {
   /** ISO: the core compares dates, never connector ids. */
   sent_at: string;
   payload: unknown;
-  /** The plain text, when there is one: only the owner's commands read it. */
+  /** The plain text: the owner's commands read it, and a system row's event is told with it. */
   text?: string;
   caught_up?: boolean;
 };
 
 export type Post =
   /** as "owner": posted in the owner's name (a draft he validated). */
-  | { text: string; as?: "owner" }
-  | { gif: string }
-  | { text: string; buttons: string[] }
-  | { reaction: string }
-  | { file: { name: string; path: string } };
+  { text: string; as?: "owner" };
 
 export type DeliverResult =
   | { ok: true; ref: string; sent_at: string; link?: string }
@@ -102,6 +98,8 @@ export type ToolDef = {
   description: string;
   input: z.ZodRawShape;
   rules: Rule[];
+  /** It changes something beyond reading (posts, writes, starts): a draft for the owner never gets it. */
+  effect?: boolean;
   run(args: Record<string, unknown>, context: ToolContext): Promise<string>;
 };
 

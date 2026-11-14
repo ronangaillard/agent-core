@@ -8,10 +8,13 @@ tokens come from the environment.
 - **Durable state in SQLite**: `inbox` and `outbox` carry the state (a status), `events` keeps the history,
   append-only, `reminders` holds what is due later. Every status change writes its event in the same transaction.
 - **No polling**: an in-memory `wake()` after every write, a single timer on the next due date, one pass at start.
+  Every wake runs the full pass (scheduler, inbound, outbound) before re-arming the timer; a timer that fires early
+  waits the rest.
 - **One `respond()` at a time per thread**: the thread stays locked until its reply is delivered.
 - **Rights come from code** (`scopeOf`), never from the model.
 - **Never a double post**: an interrupted delivery (crash, timeout, ambiguous error) is never sent again; it goes
-  `dead` with an alert to the owner.
+  `dead` with an alert to the owner, written in the same transaction. A SIGTERM waits for the posts in flight.
+- **Only the owner writes the memory**: what is in it comes up in every prompt as trusted.
 
 ## Layout
 
@@ -98,10 +101,13 @@ Step 4, done:
   leaves alone and never locks its thread; a newer one in the thread replaces it. The owner is told in the same
   transaction, in his DM, with the draft, the form's note and how to act on it.
 - The owner's commands, matched by code on the rows of his private conversation before anything else (outcome
-  `intercepted`, no model call): list, send as is or edited, drop.
+  `intercepted`, no model call): list, send as is or edited, drop. Slack only: an e-mail carries no command (DMARC
+  vouches for a domain, not a mailbox).
 - Drafts in the owner's name: a human mentions him where the agent would not speak → the agent writes his reply,
   with no acting tools, held; once he sends it, it is posted with his Slack token and never counts as the agent's.
-- The e-mail connector: a Svix-signed webhook, a catch-up through the API, only allowed domains with DMARC passing,
+- The e-mail connector: a Svix-signed webhook, a catch-up through the API, only allowed domains with DMARC passing
+  (a Reply-To outside them is not followed), a thread per started mail (the first Message-ID of References, not the
+  subject),
   the owner's scope only when he writes alone with the agent, replies in the e-mail thread (In-Reply-To,
   References), a form where the agent says whether it is sure.
 - Polls need no code of their own: `send` to people, and a destination for the owner.
@@ -117,10 +123,19 @@ Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
   with a word.
 - `<in_progress>` in every prompt: open tasks and those done within 7 days, upcoming reminders, and for the owner
   what waits for him.
-- The Claude Code runner: the token stays in this process (clone, push, PR through a header of one command, never
-  in the copy); the session gets file tools inside its copy, a sandboxed terminal, and `progress`, `push_branch`,
-  `open_pr`; everything else is refused.
+- The Claude Code runner: the token stays in this process, in a vault (a bare repository per task, outside the
+  workspace, which the session can neither read nor write). The copy is cloned from the vault and never trusted:
+  pushing fetches the task's branch from the copy into the vault (no hook, no fsmonitor) and pushes from there to the
+  remote named by code. The session gets file tools inside its copy except `.git`, a sandboxed terminal that cannot
+  read the agent's folder or home, and `progress`, `push_branch`, `open_pr`; everything else is refused.
+
+After a review: the catch-up cursor is stored and moves only when a pass completes (a failed pass is tried again
+after a backoff, every page is read); a failure before a lot is fixed waits a backoff and counts, it never spins;
+`send` is once per place per lot, even reworded; a draft in the owner's name or a held reply shows only to the owner;
+a task is changed by its requester, the owner or in its own conversation, and a private conversation is not handed
+to a task that reports elsewhere; a draft gets no tool with an effect (`effect` on `ToolDef`); search results carry
+`message:<id>` for `send`.
 
 Known limits: a permission the session lacks is refused, not asked to the owner; a merged PR leaves its task
-`waiting`; the owner's own DMs with colleagues (his user token's events) are not read; an
-e-mail's thread is the subject, and `read()` gives the e-mail itself (its quoted history included).
+`waiting`; the owner's own DMs with colleagues (his user token's events) are not read; an e-mail's `read()` gives the
+e-mail itself (its quoted history included); a Slack blip shorter than `catchUpAfterMs` is not caught up.

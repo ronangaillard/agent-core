@@ -1,8 +1,16 @@
 import bolt from "@slack/bolt";
 import { z } from "zod";
-import type { Address, Connector, DeliverResult, InboxRow, Post, Thread } from "../types.ts";
+import { TransientError, type Address, type Connector, type DeliverResult, type InboxRow, type Post, type Thread } from "../types.ts";
 
-const { App, SocketModeReceiver } = bolt;
+const { App, SocketModeReceiver, webApi } = bolt;
+
+/** A read that failed for a reason that passes (rate limit, 5xx, network): the core waits and retries. */
+function readError(error: unknown): unknown {
+  const e = error as { code?: string; statusCode?: number; message?: string };
+  const passing =
+    e.code === "slack_webapi_rate_limited_error" || e.code === "slack_webapi_request_error" || (e.code === "slack_webapi_http_error" && (e.statusCode ?? 0) >= 500);
+  return passing ? new TransientError(e.message ?? String(error)) : error;
+}
 
 /** The fields of a Slack message event the connector reads. */
 type SlackMessage = {
@@ -30,6 +38,8 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
   // No silent retries in the client: a retried post is a possible double. The core decides.
   const app = new App({ token: options.botToken, receiver, clientOptions: { retryConfig: { retries: 0 }, rejectRateLimitedCalls: true } });
   const client = app.client;
+  // Reads may wait out a rate limit and retry (a read twice harms nothing); posts never do.
+  const reader = new webApi.WebClient(options.botToken, { retryConfig: { retries: 5, factor: 2, minTimeout: 1000, maxTimeout: 30_000 } });
   const self = { userId: "", botId: "" };
   const member = new Map<string, boolean>();
   const secret = new Map<string, boolean>();
@@ -48,7 +58,7 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
   async function loadMembership() {
     let cursor: string | undefined;
     do {
-      const page = await client.conversations.list({ types: "public_channel,private_channel,mpim,im", limit: 1000, exclude_archived: true, ...(cursor ? { cursor } : {}) });
+      const page = await reader.conversations.list({ types: "public_channel,private_channel,mpim,im", limit: 1000, exclude_archived: true, ...(cursor ? { cursor } : {}) });
       for (const channel of page.channels ?? []) remember(channel);
       cursor = page.response_metadata?.next_cursor || undefined;
     } while (cursor);
@@ -58,7 +68,7 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
     const known = member.get(channel);
     if (known !== undefined) return known;
     try {
-      const info = await client.conversations.info({ channel });
+      const info = await reader.conversations.info({ channel });
       if (info.channel) remember(info.channel);
       return member.get(channel) ?? false;
     } catch {
@@ -71,13 +81,32 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
     const known = names.get(user);
     if (known) return known;
     try {
-      const info = await client.users.info({ user });
+      const info = await reader.users.info({ user });
       const name = info.user?.profile?.display_name || info.user?.real_name || info.user?.name || user;
       names.set(user, name);
       return name;
     } catch {
       return user;
     }
+  }
+
+  async function readThread(address: Address): Promise<Thread> {
+    const page =
+      address.thread === "main"
+        ? await reader.conversations.history({ channel: address.conversation, limit: 30, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) })
+        : await reader.conversations.replies({ channel: address.conversation, ts: address.thread, limit: 100, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
+    const raw = (page.messages ?? []) as SlackMessage[];
+    const ordered = address.thread === "main" ? [...raw].reverse() : raw;
+    const messages = await Promise.all(
+      ordered.map(async (m) => ({
+        author: m.user === self.userId || (self.botId && m.bot_id === self.botId) ? "you" : await nameOf(m.user ?? m.bot_id),
+        text: m.text ?? "",
+        at: m.ts ? isoOf(m.ts) : "",
+      })),
+    );
+    const name = channelNames.get(address.conversation);
+    const label = address.conversation.startsWith("D") ? "in a direct message" : name ? `in #${name}` : "in a channel";
+    return { label, messages };
   }
 
   const connector: Connector = {
@@ -119,33 +148,25 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
       const oldest = (Date.parse(since) / 1000).toFixed(6);
       for (const [channel, isIn] of member) {
         if (!isIn) continue;
-        const page = await client.conversations.history({ channel, oldest, limit: 200 }).catch(() => undefined);
         const type = channel.startsWith("D") ? "im" : undefined;
-        for (const message of (page?.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
-          yield { ...message, channel, channel_type: type };
-          if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
-            const replies = await client.conversations.replies({ channel, ts: message.ts, oldest, limit: 200 }).catch(() => undefined);
-            for (const reply of ((replies?.messages ?? []) as SlackMessage[]).slice(1)) yield { ...reply, channel, channel_type: type };
+        // Every page; an error stops the pass, which the core tries again from the same cursor.
+        let cursor: string | undefined;
+        do {
+          const page = await reader.conversations.history({ channel, oldest, limit: 200, ...(cursor ? { cursor } : {}) });
+          for (const message of (page.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
+            yield { ...message, channel, channel_type: type };
+            if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
+              let next: string | undefined;
+              do {
+                const replies = await reader.conversations.replies({ channel, ts: message.ts, oldest, limit: 200, ...(next ? { cursor: next } : {}) });
+                for (const reply of (replies.messages ?? []) as SlackMessage[]) if (reply.ts !== message.ts) yield { ...reply, channel, channel_type: type };
+                next = replies.response_metadata?.next_cursor || undefined;
+              } while (next);
+            }
           }
-        }
+          cursor = page.response_metadata?.next_cursor || undefined;
+        } while (cursor);
       }
-    },
-
-    /** A Slack id, or a name matched on display name, real name or handle; then the direct message with them. */
-    async resolve(person) {
-      const wanted = person.replace(/^@/, "").toLowerCase();
-      let user = /^[UW][A-Z0-9]+$/.test(person) ? person : undefined;
-      let cursor: string | undefined;
-      while (!user) {
-        const page = await client.users.list({ limit: 500, ...(cursor ? { cursor } : {}) });
-        const found = page.members?.find((m) => !m.deleted && [m.profile?.display_name, m.real_name, m.name].some((n) => n?.toLowerCase() === wanted));
-        user = found?.id;
-        cursor = page.response_metadata?.next_cursor || undefined;
-        if (!cursor) break;
-      }
-      if (!user) return null;
-      const opened = await client.conversations.open({ users: user });
-      return opened.channel?.id ? { connector: "slack", conversation: opened.channel.id, thread: "main" } : null;
     },
 
     async toInbox(raw): Promise<InboxRow | null> {
@@ -176,22 +197,11 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
     },
 
     async read(address: Address): Promise<Thread> {
-      const page =
-        address.thread === "main"
-          ? await client.conversations.history({ channel: address.conversation, limit: 30, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) })
-          : await client.conversations.replies({ channel: address.conversation, ts: address.thread, limit: 100, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
-      const raw = (page.messages ?? []) as SlackMessage[];
-      const ordered = address.thread === "main" ? [...raw].reverse() : raw;
-      const messages = await Promise.all(
-        ordered.map(async (m) => ({
-          author: m.user === self.userId || (self.botId && m.bot_id === self.botId) ? "you" : await nameOf(m.user ?? m.bot_id),
-          text: m.text ?? "",
-          at: m.ts ? isoOf(m.ts) : "",
-        })),
-      );
-      const name = channelNames.get(address.conversation);
-      const label = address.conversation.startsWith("D") ? "in a direct message" : name ? `in #${name}` : "in a channel";
-      return { label, messages };
+      try {
+        return await readThread(address);
+      } catch (error) {
+        throw readError(error);
+      }
     },
 
     form: {
