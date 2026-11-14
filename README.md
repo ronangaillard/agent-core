@@ -33,6 +33,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
+| `src/runners/apercu.ts` | A remote terminal for the runner: steve-apercu's workshop, a container per copy |
 | `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
@@ -66,7 +67,9 @@ The webhook takes the `deployment_status` event; only final states count, once p
 
 Code tasks (off unless both are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default);
 `AGENT_WORKSPACE` (default `data/workspace`). The session's terminal runs in Claude Code's sandbox (on Linux it needs
-`bubblewrap`): it writes only in the task's copy and reaches only package registries.
+`bubblewrap`): it writes only in the task's copy and reaches only package registries. Or, with `STEVE_APERCU_URL` and
+`STEVE_APERCU_TOKEN`, Claude Code's terminal is off and every command runs in a container per copy of
+[steve-apercu](src/runners/apercu.ts)'s workshop (the copy mounted at the same path); the file tools stay local.
 
 E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
 `AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS`

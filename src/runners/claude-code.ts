@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +9,14 @@ import { jsonSchema } from "../claude.ts";
 import type { TaskOutcome, TaskRun, TaskRunner } from "../tasks.ts";
 
 const exec = promisify(execFile);
+
+/** A terminal in another container, opened for one copy: every command of the task runs there. */
+export type Terminal = {
+  run(command: string, timeoutSeconds: number): Promise<{ code: number; output: string }>;
+  close(): Promise<void>;
+};
+/** Opens the terminal of a copy (an absolute path, which must be the same path inside the remote container). */
+export type RemoteTerminal = (dir: string) => Promise<Terminal>;
 
 export type ClaudeCodeOptions = {
   /** Where the copies live, one per task. The session writes nowhere else. */
@@ -29,6 +37,9 @@ export type ClaudeCodeOptions = {
   /** What the sandboxed terminal may reach: package registries. */
   allowedDomains?: string[];
   timeoutMs?: number;
+  /** When set, Claude Code's own terminal (Bash) is off and its sandbox unused: every command goes through the
+   * terminal tool to this remote container. The session keeps its file tools on the same copy. */
+  terminal?: RemoteTerminal;
 };
 
 const REGISTRIES = ["registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org"];
@@ -110,12 +121,17 @@ export async function pushBranch(dir: string, vault: string, remote: string, bra
   await git(["push", "--quiet", remote, `refs/heads/${branch}:refs/heads/${branch}`], { cwd: vault, token });
 }
 
+/** The commits' author, in the terminal's environment. */
+export function gitIdentity(name: string): Record<string, string> {
+  const email = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@users.noreply.github.com`;
+  return { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_EMAIL: email };
+}
+
 /** The terminal sees none of the agent's secrets. */
 function cleanEnvironment(name: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR"]) if (process.env[key]) env[key] = process.env[key]!;
-  const email = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@users.noreply.github.com`;
-  Object.assign(env, { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_EMAIL: email, CI: "1" });
+  Object.assign(env, gitIdentity(name), { CI: "1" });
   // Claude itself must be logged in; every command it runs gets the credentials stripped.
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) Object.assign(env, { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
   if (process.env.ANTHROPIC_API_KEY) Object.assign(env, { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
@@ -146,17 +162,44 @@ export function fileUseAllowed(dir: string, name: string, input: Record<string, 
   return patterns.every(safe) && insideCopy(dir, String(input.file_path ?? input.path ?? input.notebook_path ?? "."));
 }
 
+/** The terminal tool, opening the remote terminal at its first command; env is exported before each command. */
+export function terminalTool(open: () => Promise<Terminal>, env: Record<string, string> = {}) {
+  const exports = Object.entries(env)
+    .map(([key, value]) => `export ${key}='${value.replaceAll("'", `'\\''`)}'\n`)
+    .join("");
+  return tool(
+    "terminal",
+    "Run a bash command in your copy's container (git, node, npm, pnpm, python3, jq, rg…). Each call is a new bash starting in the copy's folder, at the same path as your file tools see it: chain with && or cd in the same command; nothing stays in the background between calls. Network: package registries only. Returns the exit code and the output (stdout and stderr, the end when long). Give a long command (install, tests) enough time.",
+    {
+      command: z.string().min(1),
+      timeout_seconds: z.number().int().min(5).max(1800).default(600).describe("Beyond it the command is stopped (exit code 124)"),
+    },
+    async ({ command, timeout_seconds }) => {
+      try {
+        const terminal = await open();
+        const { code, output } = await terminal.run(exports + command, timeout_seconds);
+        return { content: [{ type: "text" as const, text: `exit code ${code}\n${output || "(no output)"}` }] };
+      } catch (error) {
+        return { content: [{ type: "text" as const, text: `The terminal failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+      }
+    },
+  );
+}
+
 const resultSchema = z.object({ report: z.string().describe("Your report, short, in your voice: what you did, the PR link, what is left or to check") });
 
 /**
  * Code tasks done by a Claude Code session in the task's copy. Its terminal runs in Claude Code's sandbox: it writes
  * only in the copy, reaches only package registries, and holds no token. Pushing and opening the PR go through tools
  * of this process, on the task's branch only. Anything the sandbox and the rules do not allow is refused.
+ * With a remote terminal, Claude Code's own terminal is off: every command runs in that container instead.
  */
 export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
   const workspace = resolve(options.workspace);
   const vaults = resolve(options.vault ?? `${workspace}-vault`);
   const base = options.gitBase ?? "https://github.com";
+  // The copies are written here and in the remote container (another uid, allowed by an ACL): files group-writable.
+  if (options.terminal) process.umask(0o002);
 
   async function github<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`https://api.github.com${path}`, {
@@ -173,8 +216,26 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const dir = join(workspace, `task-${task.id}`);
     const vault = join(vaults, `task-${task.id}.git`);
     const remote = `${base}/${task.repo}.git`;
-    const { log, upstream } = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
+    const prepared = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
+    const { log } = prepared;
+    let upstream = prepared.upstream;
+    // The remote container sees the copy only: the bundle goes into it (its .git, never committed).
+    if (upstream && options.terminal) {
+      const inside = join(dir, ".git", "upstream.bundle");
+      copyFileSync(upstream, inside);
+      upstream = inside;
+    }
     let pr = task.pr;
+    const remoteTerminal = options.terminal;
+    let opened: Promise<Terminal> | undefined;
+    const openTerminal = () => {
+      if (!remoteTerminal) throw new Error("no remote terminal");
+      if (!opened) {
+        opened = remoteTerminal(dir);
+        opened.catch(() => (opened = undefined));
+      }
+      return opened;
+    };
 
     const server = createSdkMcpServer({
       name: SERVER,
@@ -199,6 +260,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           run.setPr(opened.number);
           return { content: [{ type: "text" as const, text: `PR #${opened.number} opened: ${opened.html_url}` }] };
         }),
+        ...(remoteTerminal ? [terminalTool(openTerminal, gitIdentity(options.name))] : []),
       ],
     });
 
@@ -209,6 +271,22 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
         if (fileUseAllowed(dir, name, input)) return { behavior: "allow", updatedInput: input };
       }
       return { behavior: "deny", message: `${name} is not allowed in a code task: do without, or say what you are missing in your report.` };
+    };
+
+    // Without a remote terminal, Claude Code's own, in its sandbox: writes in the copy only, never its git config or
+    // hooks; reads nothing of the agent's (its folder, its home); network to package registries only.
+    const sandbox = {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      network: { allowedDomains: options.allowedDomains ?? REGISTRIES },
+      filesystem: {
+        allowWrite: [dir],
+        denyWrite: [join(dir, ".git", "config"), join(dir, ".git", "hooks")],
+        denyRead: [homedir(), process.cwd(), vaults, ...(options.denyRead ?? [])],
+        allowRead: [dir, ...(upstream ? [upstream] : [])],
+      },
     };
 
     const abort = new AbortController();
@@ -230,29 +308,17 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           .filter(Boolean)
           .join("\n\n"),
         options: {
-          systemPrompt: `${options.persona}\n\nYou are doing a code task in your own copy of ${task.repo}. Read the code and follow its conventions, make a focused change, run the project's checks, commit, then push_branch and open_pr. Never merge, never push elsewhere: it is enforced. Give news with progress on long tasks. End with a short report.`,
+          systemPrompt: `${options.persona}\n\nYou are doing a code task in your own copy of ${task.repo}. Read the code and follow its conventions, make a focused change, run the project's checks, commit, then push_branch and open_pr. Never merge, never push elsewhere: it is enforced. Give news with progress on long tasks. End with a short report.${remoteTerminal ? " Your terminal is the terminal tool (a container with only your copy); read and change files with Read, Edit, Write, Glob, Grep." : ""}`,
           cwd: dir,
           ...(options.model ? { model: options.model } : {}),
           ...(options.executable ? { pathToClaudeCodeExecutable: options.executable } : {}),
           env: cleanEnvironment(options.name),
           mcpServers: { [SERVER]: server },
-          allowedTools: [`mcp__${SERVER}__progress`, `mcp__${SERVER}__push_branch`, `mcp__${SERVER}__open_pr`],
-          disallowedTools: ["WebFetch", "WebSearch", "Bash(git push:*)", "Bash(git remote:*)", "Bash(git config:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(ssh:*)"],
+          allowedTools: [`mcp__${SERVER}__progress`, `mcp__${SERVER}__push_branch`, `mcp__${SERVER}__open_pr`, ...(remoteTerminal ? [`mcp__${SERVER}__terminal`] : [])],
+          ...(remoteTerminal ? { tools: ["Read", "Edit", "Write", "Glob", "Grep", "TodoWrite"] } : {}),
+          disallowedTools: [...(remoteTerminal ? ["Bash"] : []), "WebFetch", "WebSearch", "Bash(git push:*)", "Bash(git remote:*)", "Bash(git config:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(ssh:*)"],
           canUseTool,
-          sandbox: {
-            enabled: true,
-            failIfUnavailable: true,
-            autoAllowBashIfSandboxed: true,
-            allowUnsandboxedCommands: false,
-            network: { allowedDomains: options.allowedDomains ?? REGISTRIES },
-            // Writes in the copy only, never its git config or hooks; reads nothing of the agent's (its folder, its home).
-            filesystem: {
-              allowWrite: [dir],
-              denyWrite: [join(dir, ".git", "config"), join(dir, ".git", "hooks")],
-              denyRead: [homedir(), process.cwd(), vaults, ...(options.denyRead ?? [])],
-              allowRead: [dir, ...(upstream ? [upstream] : [])],
-            },
-          },
+          ...(remoteTerminal ? {} : { sandbox }),
           settingSources: [],
           persistSession: false,
           abortController: abort,
@@ -269,6 +335,8 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     } finally {
       clearTimeout(timer);
       run.signal.removeEventListener("abort", stop);
+      // The task's container goes with the run (the copy stays, for the next one).
+      if (opened) await opened.then((terminal) => terminal.close()).catch((error) => console.error("terminal not closed", error));
     }
   };
 }
