@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { TransientError, type Brain } from "./types.ts";
 
@@ -16,13 +16,32 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   return rest;
 }
 
+const SERVER = "agent";
+
 /**
- * The model through the Claude Agent SDK. Step 1: no tools, a structured answer. No session on the model side: the
- * prompt is rebuilt at each call.
+ * The model through the Claude Agent SDK, with a structured answer. The tools are an in-process MCP server built for
+ * this call: the model sees only those the scope allows (dontAsk refuses everything else), and no built-in tool. No
+ * session on the model side: the prompt is rebuilt at each call.
  */
-export function claudeBrain(options: { model?: string; executable?: string } = {}): Brain {
-  return async ({ system, prompt, schema }) => {
+export function claudeBrain(options: { model?: string; executable?: string; maxTurns?: number } = {}): Brain {
+  return async ({ system, prompt, schema, tools = [] }) => {
     try {
+      const server =
+        tools.length > 0
+          ? createSdkMcpServer({
+              name: SERVER,
+              version: "1.0.0",
+              tools: tools.map((t) =>
+                tool(t.name, t.description, t.input, async (args: Record<string, unknown>) => {
+                  try {
+                    return { content: [{ type: "text" as const, text: await t.run(args) }] };
+                  } catch (error) {
+                    return { content: [{ type: "text" as const, text: `Failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+                  }
+                }),
+              ),
+            })
+          : undefined;
       const conversation = query({
         prompt,
         options: {
@@ -30,11 +49,12 @@ export function claudeBrain(options: { model?: string; executable?: string } = {
           ...(options.model ? { model: options.model } : {}),
           ...(options.executable ? { pathToClaudeCodeExecutable: options.executable } : {}),
           tools: [],
-          allowedTools: [],
+          mcpServers: server ? { [SERVER]: server } : {},
+          allowedTools: tools.map((t) => `mcp__${SERVER}__${t.name}`),
           permissionMode: "dontAsk",
           settingSources: [],
           persistSession: false,
-          maxTurns: 3,
+          maxTurns: tools.length > 0 ? (options.maxTurns ?? 20) : 3,
           outputFormat: { type: "json_schema", schema: jsonSchema(schema) },
         },
       });

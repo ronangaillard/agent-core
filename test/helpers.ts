@@ -2,11 +2,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { Core, type CoreConfig } from "../src/core.ts";
+import { Core, defaultConfig, type CoreConfig, type CoreOptions } from "../src/core.ts";
 import { openDb } from "../src/db.ts";
 import type { Address, Brain, Connector, DeliverResult, InboxRow, Post, Scope, ThreadMessage } from "../src/types.ts";
 
 export const config: CoreConfig = {
+  ...defaultConfig,
   ownerId: "ronan",
   persona: "You are a test agent.",
   settleHumanMs: 20,
@@ -55,10 +56,31 @@ export class FakeConnector implements Connector {
   sent: { address: Address; post: Post }[] = [];
   scopes: Scope[] = [];
   deliverImpl: ((address: Address, post: Post) => Promise<DeliverResult>) | undefined;
+  /** What a catch-up returns, and the dates it was asked from. */
+  missed: InboxRow[] = [];
+  catchUps: string[] = [];
+  private readonly connected: (() => void)[] = [];
+  private readonly disconnected: (() => void)[] = [];
 
   constructor(private readonly world: World) {}
 
   async start() {}
+  onConnected(callback: () => void) {
+    this.connected.push(callback);
+  }
+  onDisconnected(callback: () => void) {
+    this.disconnected.push(callback);
+  }
+  drop() {
+    this.disconnected.forEach((callback) => callback());
+  }
+  reconnect() {
+    this.connected.forEach((callback) => callback());
+  }
+  async *catchUp(since: string) {
+    this.catchUps.push(since);
+    for (const row of this.missed) if (row.sent_at >= since) yield row;
+  }
   async toInbox(raw: unknown) {
     return raw as InboxRow;
   }
@@ -103,8 +125,8 @@ export function freshDb() {
   return join(mkdtempSync(join(tmpdir(), "agent-core-")), "agent.db");
 }
 
-export function makeCore(path: string, connector: Connector, brain: Brain, overrides: Partial<CoreConfig> = {}) {
-  return new Core({ db: openDb(path), connectors: [connector], brain, config: { ...config, ...overrides } });
+export function makeCore(path: string, connector: Connector, brain: Brain, overrides: Partial<CoreConfig> = {}, extra: Partial<Omit<CoreOptions, "db" | "connectors" | "brain" | "config">> = {}) {
+  return new Core({ db: openDb(path), connectors: [connector], brain, config: { ...config, ...overrides }, ...extra });
 }
 
 /** Tests only: wait for a condition. */

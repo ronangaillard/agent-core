@@ -72,11 +72,34 @@ export interface Connector {
   form: Form;
   deliver(address: Address, post: Post): Promise<DeliverResult>;
   typing?(address: Address): Promise<void>;
-  /** Called on (re)connection: the core retries what was waiting. */
+  /** Called on (re)connection: the core retries what was waiting and catches up after a real outage. */
   onConnected?(callback: () => void): void;
+  /** Called on disconnection: the core freezes its catch-up cursor. */
+  onDisconnected?(callback: () => void): void;
+  /** Raw events since this date (ISO), for the catch-up after a restart or an outage. */
+  catchUp?(since: string): AsyncIterable<unknown>;
 }
 
+/** How the agent engages in a place: only when mentioned, once mentioned in a thread, or triaged by a cheap model. */
+export type Mode = "mention" | "mention-sticky" | "triage";
+
+/** Who may use a tool: every conversation, or the owner's private one. Decided by code, never by the model. */
+export type Rule = "all" | "owner";
+
+export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[] };
+
+export type ToolDef = {
+  name: string;
+  description: string;
+  input: z.ZodRawShape;
+  rules: Rule[];
+  run(args: Record<string, unknown>, context: ToolContext): Promise<string>;
+};
+
+/** A tool bound to one respond(): its context is fixed, the model only gives the arguments. */
+export type BoundTool = { name: string; description: string; input: z.ZodRawShape; run(args: Record<string, unknown>): Promise<string> };
+
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
-export type Brain = (request: { system: string; prompt: string; schema: z.ZodType }) => Promise<unknown>;
+export type Brain = (request: { system: string; prompt: string; schema: z.ZodType; tools?: BoundTool[] }) => Promise<unknown>;
 
 export class TransientError extends Error {}

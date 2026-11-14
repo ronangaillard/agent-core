@@ -21,7 +21,10 @@ tokens come from the environment.
 | `src/db.ts` | The SQLite schema and transactions |
 | `src/store.ts` | Every read and write of the three tables |
 | `src/core.ts` | The inbound queue (lot, settle, attempts, backoff), `respond()`, the outbound queue and delivery |
-| `src/claude.ts` | The model through the Claude Agent SDK (step 1: no tools) |
+| `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
+| `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
+| `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private |
+| `src/history.ts` | The `<elsewhere>` digest and the conversation search, on `events` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/main.ts` | Startup |
 
@@ -34,8 +37,9 @@ npm start
 ```
 
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
-`AGENT_PERSONA` (default `persona.md`), `AGENT_ALERT_CHANNEL` (the owner's DM, for alerts), `CLAUDE_MODEL`,
-`CLAUDE_CODE_EXECUTABLE`.
+`AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_ALERT_CHANNEL` (the owner's
+DM, for alerts), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
+`CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`.
 
 Do not run it on the same Slack app as another agent: both would answer.
 
@@ -49,9 +53,14 @@ The tests simulate a crash at every transition (before handling, during `respond
 drafting), a SIGTERM, transient and durable errors, a burst, the per-thread lock and the limit of three concurrent
 `respond()`.
 
-## Step 1: done and not yet done
+## Status
 
-Done: the durable core end to end, a `respond()` without tools, the Slack connector (a DM gets a reply).
+Step 1, done: the durable core end to end, the Slack connector (a DM gets a reply).
 
-Not yet: per-channel engagement modes and the bot-to-bot cap, Slack catch-up, tools and `ACCESS`, memory, digest,
-reminders and scheduler, GitHub sources, the e-mail connector and `held`, the owner's path, code tasks.
+Step 2, done: engagement modes per place (`mention`, `mention-sticky`, `triage` by a cheap model, outside the
+`respond()` quota), the bot-to-bot cap (bot or system messages in a row within an hour, one "I'm stopping" post,
+reset by a human), the catch-up from a cursor frozen before connecting and at disconnection, tools with rules
+checked twice, the Markdown memory, the `<elsewhere>` digest and the conversation search with the privacy rule.
+
+Not yet: reminders and scheduler, GitHub sources, sending to named destinations, the e-mail connector and
+`held`, the owner's path (commands, drafts, polls), code tasks.

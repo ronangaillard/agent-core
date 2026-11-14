@@ -172,7 +172,7 @@ export class Store {
    * The end of respond(): the posts, the lot closed by its ids, the event with the readable text. One transaction.
    * A held reply not yet approved in this thread is replaced, not doubled.
    */
-  recordReply(lot: InboxRecord[], posts: Post[], held: boolean, readable: { input: string; output: unknown }) {
+  recordReply(lot: InboxRecord[], posts: Post[], held: boolean, readable: { input: string; output: string; author?: string; place?: string }) {
     const last = lot[lot.length - 1]!;
     const replied = posts.length > 0;
     tx(this.db, () => {
@@ -190,6 +190,74 @@ export class Store {
       this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(replied ? "replied" : "silent", now(), ...ids);
       this.event({ kind: replied ? "drafted" : "silent", thread_key: last.thread_key, author_id: last.author_id, author_kind: last.author_kind, private: lot.some((r) => r.private), ref: lot[0]!.id, payload: readable });
     });
+  }
+
+  /** A kept message refused by the bot cap. Its event tells whether the "I'm stopping" post already went. */
+  cap(row: InboxRecord, announce: boolean) {
+    tx(this.db, () => {
+      this.db.prepare("UPDATE inbox SET status = 'failed', outcome = 'capped', handled_at = ? WHERE id = ?").run(now(), row.id);
+      this.event({ kind: "capped", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id });
+      if (announce) {
+        this.db
+          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('send', NULL, ?, ?, ?, ?, 'pending', ?)")
+          .run(row.thread_key, row.connector, JSON.stringify(row.address), JSON.stringify({ text: "I'm stopping here; a human can start me again." }), now());
+      }
+    });
+  }
+
+  // --- what the engagement rules read --------------------------------------------------------------------------
+
+  /** Bot or system messages in a row in this thread, up to this one, since the last human and within the window. */
+  nonHumanStreak(threadKey: string, uptoId: number, since: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM inbox
+         WHERE thread_key = ? AND id <= ? AND author_kind != 'human' AND received_at >= ?
+           AND id > (SELECT COALESCE(MAX(id), 0) FROM inbox WHERE thread_key = ? AND author_kind = 'human' AND id <= ?)`,
+      )
+      .get(threadKey, uptoId, since, threadKey, uptoId) as Row;
+    return Number(row.n);
+  }
+
+  /** The "I'm stopping" post already went since the last human message of the thread. */
+  cappedSinceHuman(threadKey: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM events WHERE kind = 'capped' AND thread_key = ?
+             AND id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE kind = 'received' AND thread_key = ? AND author_kind = 'human')
+           LIMIT 1`,
+        )
+        .get(threadKey, threadKey) !== undefined
+    );
+  }
+
+  /** The agent already spoke in this thread (mention-sticky). */
+  agentSpokeIn(threadKey: string): boolean {
+    return this.db.prepare("SELECT 1 FROM outbox WHERE thread_key = ? AND kind IN ('reply', 'send') AND status = 'delivered' LIMIT 1").get(threadKey) !== undefined;
+  }
+
+  /** When the agent last posted in this thread (catch-up: older messages were already seen). */
+  lastDeliveredAt(threadKey: string): string | undefined {
+    const row = this.db.prepare("SELECT MAX(sent_at) AS at FROM outbox WHERE thread_key = ? AND status = 'delivered'").get(threadKey) as Row;
+    return row.at === null ? undefined : String(row.at);
+  }
+
+  /** The newest message received from a connector: the catch-up cursor. */
+  lastSourceAt(connector: string): string | undefined {
+    const row = this.db.prepare("SELECT MAX(sent_at) AS at FROM inbox WHERE connector = ? AND author_kind != 'system'").get(connector) as Row;
+    return row.at === null ? undefined : String(row.at);
+  }
+
+  /** The readable exchanges since a date, newest first: what the digest and the search read. */
+  exchanges(since: string, limit = 500): { at: string; thread_key: string; author_id: string; private: boolean; payload: Record<string, unknown> }[] {
+    return (this.db.prepare("SELECT * FROM events WHERE kind IN ('drafted', 'silent') AND at >= ? ORDER BY id DESC LIMIT ?").all(since, limit) as Row[]).map((r) => ({
+      at: String(r.at),
+      thread_key: String(r.thread_key),
+      author_id: String(r.author_id),
+      private: Boolean(r.private),
+      payload: (r.payload === null ? {} : JSON.parse(String(r.payload))) as Record<string, unknown>,
+    }));
   }
 
   // --- outbox --------------------------------------------------------------------------------------------------

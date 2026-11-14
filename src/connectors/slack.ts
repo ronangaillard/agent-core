@@ -36,6 +36,7 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
   const names = new Map<string, string>();
   const channelNames = new Map<string, string>();
   const connected: (() => void)[] = [];
+  const disconnected: (() => void)[] = [];
 
   const remember = (channel: { id?: string; is_im?: boolean; is_mpim?: boolean; is_private?: boolean; is_member?: boolean; name?: string }) => {
     if (!channel.id) return;
@@ -94,6 +95,7 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
       });
       app.event("channel_left", async ({ event }) => void member.set(event.channel, false));
       receiver.client.on("connected", () => connected.forEach((callback) => callback()));
+      receiver.client.on("disconnected", () => disconnected.forEach((callback) => callback()));
       await app.start();
     },
 
@@ -103,6 +105,30 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
 
     onConnected(callback) {
       connected.push(callback);
+    },
+
+    onDisconnected(callback) {
+      disconnected.push(callback);
+    },
+
+    /**
+     * Slack does not replay what was missed: read every conversation the bot is in since the cursor, with the replies
+     * of threads that moved. A thread whose root is older than the cursor is not seen (a known limit).
+     */
+    async *catchUp(since) {
+      const oldest = (Date.parse(since) / 1000).toFixed(6);
+      for (const [channel, isIn] of member) {
+        if (!isIn) continue;
+        const page = await client.conversations.history({ channel, oldest, limit: 200 }).catch(() => undefined);
+        const type = channel.startsWith("D") ? "im" : undefined;
+        for (const message of (page?.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
+          yield { ...message, channel, channel_type: type };
+          if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
+            const replies = await client.conversations.replies({ channel, ts: message.ts, oldest, limit: 200 }).catch(() => undefined);
+            for (const reply of ((replies?.messages ?? []) as SlackMessage[]).slice(1)) yield { ...reply, channel, channel_type: type };
+          }
+        }
+      }
     },
 
     async toInbox(raw): Promise<InboxRow | null> {

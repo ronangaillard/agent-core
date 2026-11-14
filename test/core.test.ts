@@ -171,7 +171,7 @@ test("a reply drafted but not yet sent at the crash goes out at restart", async 
   const path = freshDb();
   const store = new Store(openDb(path));
   const id = store.ingest(world.say("hi"), "fake")!;
-  store.recordReply([store.inbox(id)!], [{ text: "already drafted" }], false, { input: "hi", output: null });
+  store.recordReply([store.inbox(id)!], [{ text: "already drafted" }], false, { input: "hi", output: "" });
   const connector = new FakeConnector(world);
   const core = makeCore(path, connector, echoBrain().brain);
   await core.start();
