@@ -16,7 +16,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 - **Rights come from code** (`scopeOf`), never from the model.
 - **Never a double post**: an interrupted delivery (crash, timeout, ambiguous error) is never sent again; it goes
   `dead` with an alert to the owner, written in the same transaction. A SIGTERM waits for the posts in flight.
-- **Only the owner writes the memory**: what is in it comes up in every prompt as trusted.
+- **Only the owner writes the memory** by default: what is in it comes up in every prompt as trusted (`AGENT_MEMORY_WRITERS=all` lets the agent learn from anyone, at that risk; the persona stays out of reach).
 
 ## Layout
 
@@ -51,7 +51,8 @@ npm start
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
 `AGENT_PERSONA` (default `persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
 DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
-`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_PRIVACY` (`off`: every
+`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
+memory's `common/`, not only the owner's; the persona is never in it), `AGENT_PRIVACY` (`off`: every
 conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
 `{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no debug view: a read-only web view of

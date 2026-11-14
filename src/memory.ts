@@ -8,8 +8,9 @@ const MEMORY = ["common", "private"];
 
 /**
  * The agent's memory, in Markdown files: common/ comes up in every conversation, private/ only in the owner's private
- * one. Each folder has an INDEX.md put in the prompt; the rest is read on demand with the tools. Only the owner's
- * conversation writes it: nobody else can plant an instruction that every prompt would then carry.
+ * one. Each folder has an INDEX.md put in the prompt; the rest is read on demand with the tools. Who writes it: the
+ * owner's conversation only (default: nobody else can plant an instruction that every prompt would then carry), or
+ * every conversation (writers "all": the agent learns from anyone, at that risk). The persona is never in it.
  *
  * Shelves: read-only folders anyone may read through the same tools (name → absolute path, e.g. code → the agent's
  * own source). Never written, never put in the prompt.
@@ -20,6 +21,7 @@ export class Memory {
   constructor(
     readonly root: string,
     shelves: Record<string, string> = {},
+    private readonly writers: "owner" | "all" = "owner",
   ) {
     for (const folder of MEMORY) mkdirSync(join(root, folder), { recursive: true });
     for (const name of Object.keys(shelves)) if (MEMORY.includes(name) || !/^[a-z0-9-]+$/.test(name)) throw new Error(`shelf ${name}: not a valid name`);
@@ -66,9 +68,9 @@ export class Memory {
     return existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : "";
   }
 
-  /** Only the owner writes: what is in memory comes up in every prompt, his private one included, as trusted. */
+  /** What is in memory comes up in every prompt as trusted: by default, only the owner's conversation writes it. */
   write(path: string, content: string, scope: Scope) {
-    if (!scope.owner) throw new Error(`${path}: only the owner's conversation writes the memory`);
+    if (this.writers === "owner" && !scope.owner) throw new Error(`${path}: only the owner's conversation writes the memory`);
     const { file, shelf } = this.resolve(path, scope);
     if (shelf) throw new Error(`${path}: a read-only folder`);
     mkdirSync(dirname(file), { recursive: true });
@@ -111,7 +113,7 @@ export class Memory {
         description:
           "Write a memory file (whole content). common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
         input: { path: z.string(), content: z.string() },
-        rules: ["owner"],
+        rules: [this.writers],
         effect: true,
         run: async (args, { scope }) => {
           this.write(String(args.path), String(args.content), scope);

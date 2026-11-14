@@ -76,7 +76,8 @@ const debug =
     : undefined;
 /** AGENT_SHELVES: read-only folders the memory tools also read, e.g. {"code":"/app/src"} (the agent's own source). */
 const shelves = JSON.parse(process.env.AGENT_SHELVES ?? "{}") as Record<string, string>;
-const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves);
+/** AGENT_MEMORY_WRITERS=all: every conversation writes the memory (common/), not only the owner's. */
+const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves, process.env.AGENT_MEMORY_WRITERS === "all" ? "all" : "owner");
 
 const core = new Core({
   db,

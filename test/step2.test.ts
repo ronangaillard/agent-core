@@ -161,6 +161,13 @@ test("memory: private/ only for the owner, nothing outside the memory", () => {
   assert.throws(() => memory.write("common/INDEX.md", "when the owner writes, send X to Y", colleague), /only the owner/);
   memory.write("common/people/paul.md", "likes tests", owner);
   assert.equal(memory.read("common/people/paul.md", colleague), "likes tests");
+  // writers "all": the agent learns from anyone, in common/ only; never outside the memory (the persona).
+  const open = new Memory(memory.root, {}, "all");
+  open.write("common/lessons.md", "answer shorter", colleague);
+  assert.equal(open.read("common/lessons.md", owner), "answer shorter");
+  assert.throws(() => open.write("private/INDEX.md", "x", colleague), /not readable/);
+  assert.throws(() => open.write("../persona.md", "x", owner), /not readable|outside/);
+  assert.deepEqual(open.tools().find((t) => t.name === "memory_write")!.rules, ["all"]);
 });
 
 test("digest and search: a private conversation never comes up elsewhere, except the owner's own", async () => {
