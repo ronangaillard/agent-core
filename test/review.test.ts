@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { leftChannel } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
 import { digest } from "../src/history.ts";
+import { Memory } from "../src/memory.ts";
 import { ownerCommands } from "../src/owner.ts";
 import { Store } from "../src/store.ts";
 import { TransientError, type Address, type Brain, type DeliverResult, type Post, type Scope } from "../src/types.ts";
@@ -214,4 +218,36 @@ test("catch-up: after a series given up, a new debt gets its five tries again", 
   await waitFor(() => connector.catchUps.length === 7);
   assert.equal(core.store.catchUpFailures("fake"), 0);
   core.kill();
+});
+
+test("a model call that never answers is aborted at the deadline, frees its slot, and is retried", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const signals: AbortSignal[] = [];
+  let calls = 0;
+  const brain: Brain = async ({ signal }) => {
+    signals.push(signal!);
+    if (++calls === 1) return new Promise(() => undefined);
+    return { messages: ["here at last"] };
+  };
+  const core = makeCore(freshDb(), connector, brain, { brainTimeoutMs: 50, backoffMs: [20], maxRuns: 1 });
+  await core.start();
+  const id = core.ingest(world.say("hello?", { thread: "a" }), "fake")!;
+  // The only slot is held by the hung call; another thread waits for it.
+  core.ingest(world.say("me too", { thread: "b" }), "fake");
+  await waitFor(() => connector.sent.some((s) => s.address.conversation === "b"));
+  await waitFor(() => connector.sent.some((s) => s.address.conversation === "a"));
+  assert.equal(signals[0]!.aborted, true);
+  assert.equal(core.store.inbox(id)?.retries, 1);
+  assert.equal(core.store.inbox(id)?.attempts, 1);
+  core.kill();
+});
+
+test("memory: a write is whole or not at all, and leaves no temp file", () => {
+  const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")));
+  const owner = { owner: true, requester: "ronan", private: true };
+  memory.write("common/INDEX.md", "v1", owner);
+  memory.write("common/INDEX.md", "v2", owner);
+  assert.equal(memory.read("common/INDEX.md", owner), "v2");
+  assert.deepEqual(readdirSync(join(memory.root, "common")), ["INDEX.md"]);
 });

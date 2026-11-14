@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, normalize, relative, resolve } from "node:path";
 import { z } from "zod";
 import type { Scope, ToolDef } from "./types.ts";
@@ -72,7 +72,10 @@ export class Memory {
     const { file, shelf } = this.resolve(path, scope);
     if (shelf) throw new Error(`${path}: a read-only folder`);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, content);
+    // Whole or not at all: a crash mid-write must not leave a truncated INDEX.md going into every prompt.
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, content);
+    renameSync(temp, file);
   }
 
   /** The memory's Markdown files, and every file of the shelves. */

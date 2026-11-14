@@ -113,6 +113,7 @@ export type ToolDef = {
 export type BoundTool = { name: string; description: string; input: z.ZodRawShape; run(args: Record<string, unknown>): Promise<string> };
 
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
-export type Brain = (request: { system: string; prompt: string; schema: z.ZodType; tools?: BoundTool[] }) => Promise<unknown>;
+/** signal: aborted when the core stops waiting (its deadline); a brain should then stop its work too. */
+export type Brain = (request: { system: string; prompt: string; schema: z.ZodType; tools?: BoundTool[]; signal?: AbortSignal }) => Promise<unknown>;
 
 export class TransientError extends Error {}

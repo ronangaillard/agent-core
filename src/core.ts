@@ -30,6 +30,8 @@ export type CoreConfig = {
   /** Past this age, a transient failure becomes final. */
   maxRetryAgeMs: number;
   deliverTimeoutMs: number;
+  /** A model call (respond, the triage gate) longer than this is aborted and retried later. */
+  brainTimeoutMs: number;
   /** The owner's line (his DM): alerts, and what waits for him. None: alerts are only events. */
   ownerAddress?: Address;
   ownerName: string;
@@ -65,6 +67,7 @@ export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
   backoffMs: [60_000, 5 * 60_000, 30 * 60_000],
   maxRetryAgeMs: 6 * 3600_000,
   deliverTimeoutMs: 30_000,
+  brainTimeoutMs: 10 * 60_000,
   modes: {},
   defaultMode: "mention",
   botCap: 20,
@@ -660,11 +663,26 @@ export class Core {
     }
   }
 
+  /**
+   * A model call with a deadline: past it, the call is aborted (the brain stops its work) and it is a passing failure,
+   * retried later. A call that never answers would otherwise hold its thread's lock and its slot for good.
+   */
+  private async think(brain: Brain, request: Parameters<Brain>[0]): Promise<unknown> {
+    const abort = new AbortController();
+    try {
+      return await withTimeout(brain({ ...request, signal: abort.signal }), this.config.brainTimeoutMs);
+    } catch (error) {
+      if (!(error instanceof Timeout)) throw error;
+      abort.abort();
+      throw new TransientError(`the model did not answer within ${Math.round(this.config.brainTimeoutMs / 1000)} s`);
+    }
+  }
+
   private async ask(gate: Brain, connector: Connector, row: InboxRecord): Promise<boolean> {
     const thread = await connector.read(row.address);
     const transcript = thread.messages.slice(-15).map((m) => `${m.author}: ${m.text}`).join("\n");
     const output = gateSchema.parse(
-      await gate({
+      await this.think(gate, {
         system: `You decide whether the agent should speak in a conversation (${thread.label}). It reads everything but speaks little: silence is the rule. Speak only if it is addressed, talked about, answered, or has a concrete and decisive piece of information nobody else gave.\n\n${this.config.persona}`,
         prompt: `<conversation>\n${transcript}\n</conversation>\n\nShould the agent answer the last message?`,
         schema: gateSchema,
@@ -867,7 +885,7 @@ export class Core {
     const schema = connector.form.schema(last, scope);
     // A draft acts on nothing: the owner has not approved anything yet.
     const tools = bind(draft ? this.tools.filter((tool) => !tool.effect) : this.tools, { scope, threadKey: last.thread_key, lotIds: lot.map((row) => row.id), connector: last.connector, address: last.address, sent: new Map() });
-    const output = schema.parse(await this.options.brain({ system: instructions, prompt, schema, tools }));
+    const output = schema.parse(await this.think(this.options.brain, { system: instructions, prompt, schema, tools }));
     if (this.stopped) return;
     const formed = connector.form.toPosts(output);
     const said = (row: InboxRecord) => thread.messages.find((m) => m.at === row.sent_at);

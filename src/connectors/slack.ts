@@ -40,7 +40,15 @@ const isoOf = (ts: string) => new Date(Number(ts) * 1000).toISOString();
  * Slack through Socket Mode. The membership cache is filled at start with the bot token; a miss costs one call.
  * A conversation the bot is not in never becomes a row (the owner's DMs with others included).
  */
-export function slackConnector(options: { botToken: string; appToken: string; ownerId: string; /** To post the owner's approved drafts in his name. */ userToken?: string }): Connector {
+export function slackConnector(options: {
+  botToken: string;
+  appToken: string;
+  ownerId: string;
+  /** To post the owner's approved drafts in his name. */
+  userToken?: string;
+  /** The catch-up reads thread roots this far before its cursor, for the replies posted while away (default 7). */
+  threadLookbackDays?: number;
+}): Connector {
   const receiver = new SocketModeReceiver({ appToken: options.appToken });
   // No silent retries in the client: a retried post is a possible double. The core decides.
   const app = new App({ token: options.botToken, receiver, clientOptions: { retryConfig: { retries: 0 }, rejectRateLimitedCalls: true } });
@@ -152,10 +160,12 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
 
     /**
      * Slack does not replay what was missed: read every conversation the bot is in since the cursor, with the replies
-     * of threads that moved. A thread whose root is older than the cursor is not seen (a known limit).
+     * of threads that moved. Roots are read further back (threadLookbackDays): a reply posted while away in an older
+     * thread counts too. Only what is newer than the cursor is handed over. A thread older than that is not seen.
      */
     async *catchUp(since) {
       const oldest = (Date.parse(since) / 1000).toFixed(6);
+      const roots = ((Date.parse(since) - (options.threadLookbackDays ?? 7) * 86_400_000) / 1000).toFixed(6);
       for (const [channel, isIn] of [...member]) {
         if (!isIn) continue;
         const type = channel.startsWith("D") ? "im" : undefined;
@@ -164,14 +174,16 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
         let cursor: string | undefined;
         try {
           do {
-            const page = await reader.conversations.history({ channel, oldest, limit: 200, ...(cursor ? { cursor } : {}) });
+            const page = await reader.conversations.history({ channel, oldest: roots, limit: 200, ...(cursor ? { cursor } : {}) });
             for (const message of (page.messages ?? []) as (SlackMessage & { reply_count?: number; latest_reply?: string })[]) {
-              yield { ...message, channel, channel_type: type };
+              if (Number(message.ts ?? 0) > Number(oldest)) yield { ...message, channel, channel_type: type };
               if (message.ts && message.reply_count && Number(message.latest_reply ?? 0) > Number(oldest)) {
                 let next: string | undefined;
                 do {
                   const replies = await reader.conversations.replies({ channel, ts: message.ts, oldest, limit: 200, ...(next ? { cursor: next } : {}) });
-                  for (const reply of (replies.messages ?? []) as SlackMessage[]) if (reply.ts !== message.ts) yield { ...reply, channel, channel_type: type };
+                  for (const reply of (replies.messages ?? []) as SlackMessage[]) {
+                    if (reply.ts !== message.ts && Number(reply.ts ?? 0) > Number(oldest)) yield { ...reply, channel, channel_type: type };
+                  }
                   next = replies.response_metadata?.next_cursor || undefined;
                 } while (next);
               }

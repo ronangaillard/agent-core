@@ -18,13 +18,20 @@ export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 const SERVER = "agent";
 
+const controllerOf = (signal: AbortSignal) => {
+  const controller = new AbortController();
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener("abort", () => controller.abort(), { once: true });
+  return controller;
+};
+
 /**
  * The model through the Claude Agent SDK, with a structured answer. The tools are an in-process MCP server built for
  * this call: the model sees only those the scope allows (dontAsk refuses everything else), and no built-in tool. No
  * session on the model side: the prompt is rebuilt at each call.
  */
 export function claudeBrain(options: { model?: string; executable?: string; maxTurns?: number } = {}): Brain {
-  return async ({ system, prompt, schema, tools = [] }) => {
+  return async ({ system, prompt, schema, tools = [], signal }) => {
     try {
       const server =
         tools.length > 0
@@ -54,6 +61,8 @@ export function claudeBrain(options: { model?: string; executable?: string; maxT
           permissionMode: "dontAsk",
           settingSources: [],
           persistSession: false,
+          // The core's deadline: aborting stops the Claude Code process too.
+          ...(signal ? { abortController: controllerOf(signal) } : {}),
           maxTurns: tools.length > 0 ? (options.maxTurns ?? 20) : 3,
           outputFormat: { type: "json_schema", schema: jsonSchema(schema) },
         },

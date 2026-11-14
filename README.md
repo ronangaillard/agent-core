@@ -143,8 +143,15 @@ a task is changed by its requester, the owner or in its own conversation, and a 
 to a task that reports elsewhere; a draft gets no tool with an effect (`effect` on `ToolDef`); search results carry
 `message:<id>` for `send`.
 
+After a debate between the agent and another one, checked against the code: a model call (respond, the triage
+gate) has a deadline (`brainTimeoutMs`, 10 min): past it, the call is aborted (the Claude Code process too) and it is
+a passing failure, so a hung call never holds a thread and a slot for good; the Slack catch-up reads thread roots 7
+days before its cursor, so a reply posted while away in an older thread is caught up; memory writes are atomic
+(temp file, then rename).
+
 Known limits: a permission the session lacks is refused, not asked to the owner; a merged PR leaves its task
 `waiting`; the owner's own DMs with colleagues (his user token's events) are not read; an e-mail's `read()` gives the
 e-mail itself (its quoted history included); an e-mail thread with several people is one conversation per sender,
-so two of them answering at once can each get a reply; a Slack blip shorter than `catchUpAfterMs` is not caught up;
+so two of them answering at once can each get a reply; a reply while away in a thread older than 7 days is not
+caught up; a Slack blip shorter than `catchUpAfterMs` is not caught up;
 one live event not read for a passing reason costs a full catch-up pass.
