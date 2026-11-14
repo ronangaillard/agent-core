@@ -149,14 +149,17 @@ export function gitIdentity(name: string): Record<string, string> {
   return { GIT_AUTHOR_NAME: name, GIT_COMMITTER_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_EMAIL: email };
 }
 
-/** The terminal sees none of the agent's secrets. */
-function cleanEnvironment(name: string): Record<string, string> {
+/**
+ * The session's environment: none of the agent's secrets but Claude's own login. With its own terminal, every command
+ * it runs gets that login stripped (SUBPROCESS_ENV_SCRUB, which needs bubblewrap on Linux). With a remote terminal,
+ * Claude Code runs no command: nothing to strip, and scrubbing would refuse to start without bubblewrap.
+ */
+export function sessionEnvironment(name: string, remoteTerminal: boolean, from: Record<string, string | undefined> = process.env): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR"]) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR"]) if (from[key]) env[key] = from[key]!;
   Object.assign(env, gitIdentity(name), { CI: "1" });
-  // Claude itself must be logged in; every command it runs gets the credentials stripped.
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) Object.assign(env, { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
-  if (process.env.ANTHROPIC_API_KEY) Object.assign(env, { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
+  for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]) if (from[key]) env[key] = from[key]!;
+  if (!remoteTerminal && (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
   return env;
 }
 
@@ -335,7 +338,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           cwd: dir,
           ...(options.model ? { model: options.model } : {}),
           ...(options.executable ? { pathToClaudeCodeExecutable: options.executable } : {}),
-          env: cleanEnvironment(options.name),
+          env: sessionEnvironment(options.name, Boolean(remoteTerminal)),
           mcpServers: { [SERVER]: server },
           allowedTools: [`mcp__${SERVER}__progress`, `mcp__${SERVER}__push_branch`, `mcp__${SERVER}__open_pr`, ...(remoteTerminal ? [`mcp__${SERVER}__terminal`] : [])],
           ...(remoteTerminal ? { tools: ["Read", "Edit", "Write", "Glob", "Grep", "TodoWrite"] } : {}),

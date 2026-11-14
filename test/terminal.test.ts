@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { apercuTerminal } from "../src/runners/apercu.ts";
-import { gitIdentity, terminalTool, tokenFor, tokensFromEnv, type Terminal } from "../src/runners/claude-code.ts";
+import { gitIdentity, sessionEnvironment, terminalTool, tokenFor, tokensFromEnv, type Terminal } from "../src/runners/claude-code.ts";
 
 type Call = { method: string; path: string; auth?: string; body: Record<string, unknown> };
 
@@ -138,4 +138,18 @@ test("each repository gets its owner's token, else the default one", () => {
   assert.equal(tokenFor("acme-labs/api", "default", byOwner), "acme");
   assert.equal(tokenFor("maestro-tech/still-maestro", "default", byOwner), "default");
   assert.equal(tokenFor("ronanx/repo", "default", byOwner), "default", "a prefix is not the owner");
+});
+
+test("the session's environment: Claude's login only, scrubbed from commands unless the terminal is remote", () => {
+  const from = { PATH: "/bin", HOME: "/h", CLAUDE_CODE_OAUTH_TOKEN: "oauth", GITHUB_TOKEN: "gh", SLACK_BOT_TOKEN: "slack" };
+  const local = sessionEnvironment("Steve", false, from);
+  assert.equal(local.CLAUDE_CODE_OAUTH_TOKEN, "oauth");
+  assert.equal(local.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+  assert.equal(local.GITHUB_TOKEN, undefined);
+  assert.equal(local.SLACK_BOT_TOKEN, undefined);
+  const remote = sessionEnvironment("Steve", true, from);
+  assert.equal(remote.CLAUDE_CODE_OAUTH_TOKEN, "oauth");
+  assert.equal(remote.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, undefined, "scrubbing needs bubblewrap, and no command runs locally");
+  assert.equal(remote.GITHUB_TOKEN, undefined);
+  assert.equal(remote.GIT_AUTHOR_NAME, "Steve");
 });
