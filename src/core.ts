@@ -8,7 +8,10 @@ import { inProgress, taskTools, taskVisible, type TaskRunner } from "./tasks.ts"
 import { digest } from "./history.ts";
 import type { Memory } from "./memory.ts";
 import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type TaskRecord } from "./store.ts";
-import { TransientError, type Address, type Brain, type Connector, type DeliverResult, type InboxRow, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ToolContext, type ToolDef } from "./types.ts";
+import { TransientError, type Address, type BoundTool, type Brain, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef } from "./types.ts";
+
+/** A message as the models read it: its local time, who, what. */
+const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}: ${m.text}`;
 
 const gateSchema = z.object({ speak: z.boolean().describe("true only if the agent has a real reason to speak") });
 const gateReactSchema = gateSchema.extend({
@@ -185,6 +188,8 @@ export class Core {
   readonly prompts: Prompts;
   /** The gate's reactions on the messages it kept silent, until they are closed (in memory: a re-run asks again). */
   private readonly gateReactions = new Map<number, string>();
+  /** The last failure of a pending message, for when it is given up (in memory: a restart only loses the reason). */
+  private readonly lastErrors = new Map<number, string>();
   private timer: NodeJS.Timeout | undefined;
   /** The code tasks running or queued (one runs at a time), by task id. */
   private readonly runs = new Map<number, AbortController>();
@@ -476,7 +481,7 @@ export class Core {
       const connector = found && this.connectors.get(found.connector);
       if (!found || !connector) return "No such message (found:<n> refs last until a restart).";
       const thread = await connector.read(found.address);
-      return `${thread.label}\n${thread.messages.map((m) => `[${localTime(m.at)}] ${m.author}: ${m.text}`).join("\n")}`;
+      return `${thread.label}\n${thread.messages.map(asRead).join("\n")}`;
     }
     const id = /^(?:message:)?(\d+)$/.exec(ref.trim());
     const row = id ? this.store.inbox(Number(id[1])) : undefined;
@@ -486,7 +491,7 @@ export class Core {
     if (row.thread_key === context.threadKey) return "That is this conversation: you already have it.";
     // The thread as it is now, not as it was at that message.
     const thread = await connector.read(threadOf(row.address));
-    const lines = thread.messages.map((m) => `[${localTime(m.at)}] ${m.author}: ${m.text}`);
+    const lines = thread.messages.map(asRead);
     return `${thread.label} [${row.thread_key}]\n${lines.join("\n")}`;
   }
 
@@ -680,7 +685,7 @@ export class Core {
         const outcome = await runner({
           task,
           request,
-          conversation: thread ? thread.messages.map((m) => `${m.author}: ${m.text}`).join("\n") : "",
+          conversation: thread ? thread.messages.map(asRead).join("\n") : "",
           resumed,
           signal: abort.signal,
           progress: (text) => {
@@ -760,10 +765,11 @@ export class Core {
    * A model call with a deadline: past it, the call is aborted (the brain stops its work) and it is a passing failure,
    * retried later. A call that never answers would otherwise hold its thread's lock and its slot for good.
    */
-  private async think(brain: Brain, request: Parameters<Brain>[0]): Promise<unknown> {
+  private async think(brain: Brain, request: Parameters<Brain>[0], trace: { model: string; row: InboxRecord }): Promise<unknown> {
     const abort = new AbortController();
+    const onRun = (run: BrainRun) => this.store.trace("run", trace.row.thread_key, trace.row.private, trace.row.id, { model: trace.model, ...run });
     try {
-      return await withTimeout(brain({ ...request, signal: abort.signal }), this.config.brainTimeoutMs);
+      return await withTimeout(brain({ ...request, signal: abort.signal, onRun }), this.config.brainTimeoutMs);
     } catch (error) {
       if (!(error instanceof Timeout)) throw error;
       abort.abort();
@@ -773,7 +779,7 @@ export class Core {
 
   private async ask(gate: Brain, connector: Connector, row: InboxRecord): Promise<boolean> {
     const thread = await connector.read(row.address);
-    const transcript = thread.messages.slice(-15).map((m) => `${m.author}: ${m.text}`).join("\n");
+    const transcript = thread.messages.slice(-15).map(asRead).join("\n");
     // A connector that cannot react is never offered to.
     const schema = connector.reacts ? gateReactSchema : gateSchema;
     const output = schema.parse(
@@ -781,7 +787,7 @@ export class Core {
         system: [this.prompts.text("gate", { label: thread.label }), connector.reacts ? this.prompts.text("gate-react") : "", this.prompts.text("persona")].filter(Boolean).join("\n\n"),
         prompt: `<conversation>\n${transcript}\n</conversation>\n\nShould the agent answer the last message?`,
         schema,
-      }),
+      }, { model: "gate", row }),
     ) as { speak: boolean; reaction?: string };
     if (!output.speak && output.reaction?.trim()) this.gateReactions.set(row.id, output.reaction.trim());
     return output.speak;
@@ -795,7 +801,14 @@ export class Core {
       if (row.next_attempt_at && row.next_attempt_at > due) break;
       if (await this.command(row)) continue;
       if (row.attempts >= 2) {
-        this.store.fail(row, "attempts", `Message given up after two attempts (${row.source_id}).`);
+        const error = this.lastErrors.get(row.id);
+        this.lastErrors.delete(row.id);
+        // Who asked the agent directly hears it could not answer; a message it was not asked stays silent.
+        const asked = row.author_kind === "human" && (row.dm || row.mentions_agent);
+        this.store.fail(row, "attempts", `Message given up after two attempts (${row.source_id})${error ? `: ${error}` : "."}`, {
+          ...(error ? { error } : {}),
+          ...(asked ? { apology: this.prompts.text("failed-reply", { owner: this.config.ownerName }) } : {}),
+        });
         queueMicrotask(() => this.wake());
         continue;
       }
@@ -907,8 +920,33 @@ export class Core {
       return;
     }
     console.error(`${head.thread_key}: failed`, error);
+    // Kept for the give-up: the owner's alert and the failed event say why.
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+    for (const id of ids) this.lastErrors.set(id, message);
+    this.store.trace("error", head.thread_key, head.private, head.id, { error: message });
     if (!counted) this.store.countAttempt(ids);
     this.store.delay(ids, later(this.backoff(head.retries)));
+  }
+
+  /** A tool whose every call is an event: what it was asked, what it answered, how long (the owner sees what was tried). */
+  private traced(tool: BoundTool, row: InboxRecord): BoundTool {
+    const cut = (text: string) => (text.length > 600 ? `${text.slice(0, 600)}…` : text);
+    return {
+      ...tool,
+      run: async (args) => {
+        const started = Date.now();
+        const record = (result: string, ok: boolean) =>
+          this.store.trace("tool", row.thread_key, row.private, row.id, { tool: tool.name, args: cut(JSON.stringify(args)), result: cut(result), ok, ms: Date.now() - started });
+        try {
+          const result = await tool.run(args);
+          record(result, true);
+          return result;
+        } catch (error) {
+          record(error instanceof Error ? error.message : String(error), false);
+          throw error;
+        }
+      },
+    };
   }
 
   private isOwner(row: InboxRecord) {
@@ -958,7 +996,7 @@ export class Core {
     const scope = this.scopeOf(lot);
     void connector.typing?.(last.address).catch(() => undefined);
     const thread = await connector.read(last.address);
-    const transcript = thread.messages.map((m) => `${m.author}: ${m.text}`).join("\n");
+    const transcript = thread.messages.map(asRead).join("\n");
     const late = lot.some((row) => row.caught_up) ? `\n${this.prompts.text("ask-late")}` : "";
     const elsewhere = digest(this.store, last.thread_key, scope, this.privacy);
     const acted = this.store.acted(last.thread_key);
@@ -970,6 +1008,7 @@ export class Core {
         ? this.prompts.text("ask-draft", { owner: this.config.ownerName })
         : `${this.prompts.text("ask-new", { count: lot.length })}${late}`;
     const prompt = [
+      `Now: ${clock()}.`,
       elsewhere ? `Your other recent conversations (not this one), newest first:\n<elsewhere>\n${elsewhere}\n</elsewhere>` : "",
       `The conversation (${thread.label}), oldest first:\n<conversation>\n${transcript}\n</conversation>`,
       going ? `What you have going on, newest first:\n<in_progress>\n${going}\n</in_progress>` : "",
@@ -983,6 +1022,7 @@ export class Core {
     const instructions = [
       this.prompts.text("persona"),
       this.prompts.text(guide.prompt, guide.vars),
+      this.prompts.text("tools-first"),
       memory ? `Your memory:\n<memory>\n${memory}\n</memory>` : "",
       this.prompts.text("safety"),
     ]
@@ -990,8 +1030,9 @@ export class Core {
       .join("\n\n");
     const schema = connector.form.schema(last, scope);
     // A draft acts on nothing: the owner has not approved anything yet.
-    const tools = bind(draft ? this.tools.filter((tool) => !tool.effect) : this.tools, { scope, threadKey: last.thread_key, lotIds: lot.map((row) => row.id), connector: last.connector, address: last.address, sent: new Map() });
-    const output = schema.parse(await this.think(this.options.brain, { system: instructions, prompt, schema, tools }));
+    const bound = bind(draft ? this.tools.filter((tool) => !tool.effect) : this.tools, { scope, threadKey: last.thread_key, lotIds: lot.map((row) => row.id), connector: last.connector, address: last.address, sent: new Map() });
+    const tools = bound.map((tool) => this.traced(tool, last));
+    const output = schema.parse(await this.think(this.options.brain, { system: instructions, prompt, schema, tools }, { model: draft ? "draft" : "reply", row: last }));
     if (this.stopped) return;
     const formed = connector.form.toPosts(output);
     const said = (row: InboxRecord) => thread.messages.find((m) => m.at === row.sent_at);

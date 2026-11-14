@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { leftChannel } from "../src/connectors/slack.ts";
+import { leftChannel, unslack } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
 import { debugServer } from "../src/debug.ts";
 import { digest } from "../src/history.ts";
@@ -403,4 +403,37 @@ test("reactions: a connector that cannot react is never offered one, and never s
   assert.equal(core.store.allOutbox().length, 0);
   assert.doesNotMatch(JSON.stringify(schemas), /reaction/);
   core.kill();
+});
+
+test("trace: every tool call and every model run is an event; the prompt carries the clock and message times", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const prompts: string[] = [];
+  const brain: Brain = async ({ prompt, tools = [], onRun }) => {
+    prompts.push(prompt);
+    await tools.find((t) => t.name === "list_reminders")!.run({});
+    onRun?.({ turns: 2, cost_usd: 0.01, ms: 1200, outcome: "success" });
+    return { messages: ["ok"] };
+  };
+  const core = makeCore(freshDb(), connector, brain);
+  await core.start();
+  core.ingest(world.say("any reminder?"), "fake");
+  await waitFor(() => connector.sent.length === 1);
+  const events = core.store.events("fake:t1");
+  const tool = events.find((e) => e.kind === "tool")?.payload as { tool: string; ok: boolean; result: string };
+  assert.equal(tool.tool, "list_reminders");
+  assert.equal(tool.ok, true);
+  assert.match(tool.result, /No reminder/);
+  assert.deepEqual(events.find((e) => e.kind === "run")?.payload, { model: "reply", turns: 2, cost_usd: 0.01, ms: 1200, outcome: "success" });
+  assert.match(prompts[0]!, /^Now: \w+day \d{4}-\d\d-\d\d \d\d:\d\d \(/);
+  assert.match(prompts[0]!, /\[\d{4}-\d\d-\d\d \d\d:\d\d\] ronan: any reminder\?/);
+  core.kill();
+});
+
+test("slack text: mentions by name, links and channels by label, entities decoded", () => {
+  const names: Record<string, string> = { U0AB12CD: "Paul" };
+  assert.equal(
+    unslack("<@U0AB12CD> see <#C0123|general> and <https://x.dev/a|the doc> or <https://y.dev> &lt;3 <!here>", (id) => names[id] ?? id),
+    "@Paul see #general and the doc (https://x.dev/a) or https://y.dev <3 @here",
+  );
 });

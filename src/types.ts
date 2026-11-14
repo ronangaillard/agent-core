@@ -68,6 +68,12 @@ export type Privacy = { ownerId: string; on: boolean };
 export const mayRecall = (item: { private: boolean; author: string }, scope: Scope, privacy: Privacy) =>
   !privacy.on || !item.private || (scope.owner && item.author === privacy.ownerId);
 
+/** Now, as the agent reads it: the weekday, local time, the time zone. */
+export function clock(at = new Date()): string {
+  const day = at.toLocaleDateString("en-GB", { weekday: "long" });
+  return `${day} ${localTime(at.toISOString())} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
+}
+
 /** A date as the agent reads it: local time (the process's TZ), to the minute. */
 export function localTime(iso: string): string {
   const d = new Date(iso);
@@ -142,6 +148,8 @@ export type BoundTool = { name: string; description: string; input: z.ZodRawShap
 
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
 /** signal: aborted when the core stops waiting (its deadline); a brain should then stop its work too. */
-export type Brain = (request: { system: string; prompt: string; schema: z.ZodType; tools?: BoundTool[]; signal?: AbortSignal }) => Promise<unknown>;
+/** onRun: what the call cost, told once it ends (success or not), for the trace. */
+export type BrainRun = { turns: number; cost_usd: number; ms: number; outcome: string };
+export type Brain = (request: { system: string; prompt: string; schema: z.ZodType; tools?: BoundTool[]; signal?: AbortSignal; onRun?: (run: BrainRun) => void }) => Promise<unknown>;
 
 export class TransientError extends Error {}

@@ -96,7 +96,7 @@ test("crash before handling: the message is picked up at start", async () => {
   core.kill();
 });
 
-test("crash during respond(): retried once, then given up with an alert", async () => {
+test("crash during respond(): retried once, then given up with an alert, and the asker is told", async () => {
   const world = new World();
   const path = freshDb();
   const row = world.say("tricky question");
@@ -117,7 +117,9 @@ test("crash during respond(): retried once, then given up with an alert", async 
   await third.start();
   await waitFor(() => third.store.inbox(id)?.status === "failed");
   await waitFor(() => alerts(connector).length === 1);
-  assert.equal(repliesIn(connector, "t1").length, 0);
+  // A DM to the agent: the asker hears it could not answer, once.
+  await waitFor(() => repliesIn(connector, "t1").length === 1);
+  assert.match(JSON.stringify(repliesIn(connector, "t1")[0]!.post), /could not answer/);
   third.kill();
 });
 

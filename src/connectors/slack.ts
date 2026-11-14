@@ -29,10 +29,34 @@ type SlackMessage = {
   ts?: string;
   thread_ts?: string;
   subtype?: string;
+  /** Shared files and long pastes (snippets): their name, and the start of their text. */
+  files?: { name?: string; title?: string; preview?: string }[];
+  /** Unfurls and bots' attachments. */
+  attachments?: { pretext?: string; title?: string; text?: string; fallback?: string }[];
 };
+
+/** A thread is read whole up to the message (paged), the model gets its last messages. */
+const THREAD_PAGES = 10;
+const THREAD_KEEP = 150;
+const DM_KEEP = 60;
 
 /** Message subtypes that are real messages; edits, joins, deletions… are not. */
 const SPOKEN = new Set([undefined, "file_share", "bot_message", "thread_broadcast"]);
+
+const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
+
+/** Slack's markup → plain text: mentions by name, channels and links by their label, entities decoded. */
+export function unslack(text: string, name: (id: string) => string): string {
+  return text
+    .replace(MENTION, (_, id: string) => `@${name(id)}`)
+    .replace(/<#C[A-Z0-9]+\|([^>]*)>/g, "#$1")
+    .replace(/<!(here|channel|everyone)[^>]*>/g, "@$1")
+    .replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2 ($1)")
+    .replace(/<(https?:[^>]+)>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
 
 const isoOf = (ts: string) => new Date(Number(ts) * 1000).toISOString();
 
@@ -97,6 +121,25 @@ export function slackConnector(options: {
     }
   }
 
+  /** The workspace's people, loaded once (names change rarely; a restart reloads them). */
+  let people: { id: string; names: string[] }[] | undefined;
+  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+  async function directory() {
+    if (people) return people;
+    const found: { id: string; names: string[] }[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await reader.users.list({ limit: 500, ...(cursor ? { cursor } : {}) });
+      for (const u of page.members ?? []) {
+        if (!u.id || u.deleted || u.is_bot) continue;
+        found.push({ id: u.id, names: [u.profile?.display_name, u.real_name, u.name].filter((n): n is string => Boolean(n)).map(fold) });
+      }
+      cursor = page.response_metadata?.next_cursor || undefined;
+    } while (cursor);
+    people = found;
+    return found;
+  }
+
   async function nameOf(user?: string): Promise<string> {
     if (!user) return "?";
     const known = names.get(user);
@@ -111,17 +154,53 @@ export function slackConnector(options: {
     }
   }
 
+  /** Slack's markup made readable, the people named. */
+  async function plain(text: string): Promise<string> {
+    const ids = [...new Set([...text.matchAll(MENTION)].map((m) => m[1]!))];
+    const known = new Map(await Promise.all(ids.map(async (id) => [id, id === self.userId ? "you" : await nameOf(id)] as const)));
+    return unslack(text, (id) => known.get(id) ?? id);
+  }
+
+  /** What a message says: its text, its files (and the start of a long paste), its attachments. */
+  async function readable(m: SlackMessage): Promise<string> {
+    const parts = [m.text ?? ""];
+    for (const file of m.files ?? []) parts.push(`[file: ${file.title || file.name || "?"}]${file.preview ? `\n${file.preview}` : ""}`);
+    for (const a of m.attachments ?? []) {
+      const text = [a.pretext, a.title, a.text].filter(Boolean).join("\n") || a.fallback;
+      if (text) parts.push(`[attachment] ${text}`);
+    }
+    return plain(parts.filter(Boolean).join("\n"));
+  }
+
   async function readThread(address: Address, by = reader): Promise<Thread> {
-    const page =
-      address.thread === "main"
-        ? await by.conversations.history({ channel: address.conversation, limit: 30, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) })
-        : await by.conversations.replies({ channel: address.conversation, ts: address.thread, limit: 100, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
-    const raw = (page.messages ?? []) as SlackMessage[];
-    const ordered = address.thread === "main" ? [...raw].reverse() : raw;
+    let raw: SlackMessage[];
+    if (address.thread === "main") {
+      const page = await by.conversations.history({ channel: address.conversation, limit: DM_KEEP, inclusive: true, ...(address.ts ? { latest: address.ts } : {}) });
+      raw = [...((page.messages ?? []) as SlackMessage[])].reverse();
+    } else {
+      // Replies come oldest first, by pages: read on to the message, keep the end.
+      raw = [];
+      let cursor: string | undefined;
+      for (let pages = 0; pages < THREAD_PAGES; pages++) {
+        const page = await by.conversations.replies({
+          channel: address.conversation,
+          ts: address.thread,
+          limit: 200,
+          inclusive: true,
+          ...(address.ts ? { latest: address.ts } : {}),
+          ...(cursor ? { cursor } : {}),
+        });
+        raw.push(...((page.messages ?? []) as SlackMessage[]));
+        cursor = page.response_metadata?.next_cursor || undefined;
+        if (!cursor) break;
+      }
+      // The root stays: it says what the thread is about.
+      if (raw.length > THREAD_KEEP) raw = [raw[0]!, ...raw.slice(-(THREAD_KEEP - 1))];
+    }
     const messages = await Promise.all(
-      ordered.map(async (m) => ({
+      raw.map(async (m) => ({
         author: m.user === self.userId || (self.botId && m.bot_id === self.botId) ? "you" : await nameOf(m.user ?? m.bot_id),
-        text: m.text ?? "",
+        text: await readable(m),
         at: m.ts ? isoOf(m.ts) : "",
       })),
     );
@@ -232,6 +311,27 @@ export function slackConnector(options: {
         payload: event,
         text,
       };
+    },
+
+    /** A person (an id, a mention, a name or a first name, if only one person has it) → a direct message with them. */
+    async resolve(person: string): Promise<Address | null> {
+      try {
+        const given = person.trim().replace(/^<@([UW][A-Z0-9]+)(?:\|[^>]*)?>$/, "$1").replace(/^@/, "");
+        let id = /^[UW][A-Z0-9]{6,}$/.test(given) ? given : undefined;
+        if (!id) {
+          const wanted = fold(given);
+          const all = await directory();
+          const exact = all.filter((p) => p.names.includes(wanted));
+          const first = all.filter((p) => p.names.some((n) => n.split(/\s+/)[0] === wanted));
+          const match = exact.length === 1 ? exact : exact.length === 0 && first.length === 1 ? first : [];
+          id = match[0]?.id;
+        }
+        if (!id) return null;
+        const opened = await client.conversations.open({ users: id });
+        return opened.channel?.id ? { connector: "slack", conversation: opened.channel.id, thread: "main" } : null;
+      } catch (error) {
+        throw readError(error);
+      }
     },
 
     async read(address: Address): Promise<Thread> {

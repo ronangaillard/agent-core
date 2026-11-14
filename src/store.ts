@@ -163,6 +163,11 @@ export class Store {
       .run(now(), e.kind, e.thread_key ?? null, e.author_id ?? null, e.author_kind ?? null, e.private ? 1 : 0, e.payload === undefined ? null : JSON.stringify(e.payload), e.ref ?? null);
   }
 
+  /** What a run did (a tool call, a model call): for the owner to see, never read back by the agent. */
+  trace(kind: "tool" | "run" | "error", threadKey: string, isPrivate: boolean, ref: number | null, payload: unknown) {
+    this.event({ kind, thread_key: threadKey, private: isPrivate, ref, payload });
+  }
+
   events(threadKey?: string): { kind: string; ref: number | null; payload: unknown }[] {
     const rows = (threadKey ? this.db.prepare("SELECT * FROM events WHERE thread_key = ? ORDER BY id").all(threadKey) : this.db.prepare("SELECT * FROM events ORDER BY id").all()) as Row[];
     return rows.map((r) => ({ kind: String(r.kind), ref: r.ref === null ? null : Number(r.ref), payload: r.payload === null ? null : (JSON.parse(String(r.payload)) as unknown) }));
@@ -469,10 +474,16 @@ export class Store {
     });
   }
 
-  fail(row: InboxRecord, reason: string, alert?: string) {
+  /** apology: told in the message's own thread, in the same transaction (the asker is never left with silence). */
+  fail(row: InboxRecord, reason: string, alert?: string, details?: { error?: string; apology?: string }) {
     tx(this.db, () => {
       this.db.prepare("UPDATE inbox SET status = 'failed', outcome = ?, handled_at = ? WHERE id = ?").run(reason, now(), row.id);
-      this.event({ kind: "failed", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id, payload: { reason } });
+      this.event({ kind: "failed", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id, payload: { reason, ...(details?.error ? { error: details.error } : {}) } });
+      if (details?.apology) {
+        this.db
+          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('send', NULL, ?, ?, ?, ?, 'pending', ?)")
+          .run(row.thread_key, row.connector, JSON.stringify(row.address), JSON.stringify({ text: details.apology }), now());
+      }
       this.insertAlert(alert);
     });
   }

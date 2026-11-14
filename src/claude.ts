@@ -31,7 +31,7 @@ const controllerOf = (signal: AbortSignal) => {
  * session on the model side: the prompt is rebuilt at each call.
  */
 export function claudeBrain(options: { model?: string; executable?: string; maxTurns?: number } = {}): Brain {
-  return async ({ system, prompt, schema, tools = [], signal }) => {
+  return async ({ system, prompt, schema, tools = [], signal, onRun }) => {
     try {
       const server =
         tools.length > 0
@@ -69,6 +69,7 @@ export function claudeBrain(options: { model?: string; executable?: string; maxT
       });
       for await (const message of conversation) {
         if (message.type !== "result") continue;
+        onRun?.({ turns: message.num_turns, cost_usd: message.total_cost_usd, ms: message.duration_ms, outcome: message.subtype });
         if (message.subtype !== "success" || message.is_error) {
           throw new Error(`model failed (${message.subtype})${"result" in message ? ` : ${message.result}` : ""}`);
         }
