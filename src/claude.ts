@@ -41,7 +41,9 @@ export function claudeBrain(options: { model?: string; executable?: string; maxT
               tools: tools.map((t) =>
                 tool(t.name, t.description, t.input, async (args: Record<string, unknown>) => {
                   try {
-                    return { content: [{ type: "text" as const, text: await t.run(args) }] };
+                    const result = await t.run(args);
+                    if (typeof result === "string") return { content: [{ type: "text" as const, text: result }] };
+                    return { content: [{ type: "text" as const, text: result.text }, { type: "image" as const, data: result.image.data, mimeType: result.image.mime }] };
                   } catch (error) {
                     return { content: [{ type: "text" as const, text: `Failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
                   }

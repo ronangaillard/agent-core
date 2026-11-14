@@ -26,7 +26,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/db.ts` | The SQLite schema and transactions |
 | `src/store.ts` | Every read and write of the tables |
 | `src/core.ts` | The inbound queue (lot, settle, attempts, backoff), `respond()`, the outbound queue and delivery, the scheduler, `send()` |
-| `src/act.ts` | The tools that act or reach elsewhere: `send`, `read_conversation`, `search_messages`, `set_reminder`, `list_reminders`, `cancel_reminder` |
+| `src/act.ts` | The tools that act or reach elsewhere: `send`, `read_conversation`, `search_messages`, `open_file`, `set_reminder`, `list_reminders`, `cancel_reminder` |
 | `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |
@@ -102,7 +102,7 @@ checked twice, the Markdown memory, the `<elsewhere>` digest and the conversatio
 each line), and `read_conversation`, which reads the whole conversation of a `message:<id>` under the same rule.
 `search_messages` (the owner's alone unless `AGENT_PRIVACY=off`, when a connector can `search`: Slack with `SLACK_USER_TOKEN` and `search:read`)
 searches the whole workspace with the owner's rights; `read_conversation` reads a hit's conversation (`found:<n>`).
-Trace: every tool call (`tool`: name, arguments, result, duration) and every model run (`run`: turns, cost, duration) is an event, seen in the web view. The prompt carries the clock (`Now:`) and each message its local time. A message asked of the agent (DM, mention) and given up after two failures gets a short `failed-reply` in its thread; the error goes into the `failed` event and the owner's alert. Slack threads are read paged (the root and the last 150 messages), with files, long pastes and attachments, mentions by name; `resolve` finds a person by name for `send`.
+Trace: every tool call (`tool`: name, arguments, result, duration) and every model run (`run`: turns, cost, duration) is an event, seen in the web view. The prompt carries the clock (`Now:`) and each message its local time. A message asked of the agent (DM, mention) and given up after two failures gets a short `failed-reply` in its thread; the error goes into the `failed` event and the owner's alert. Slack threads are read paged (the root and the last 150 messages), with files, long pastes and attachments, mentions by name; `resolve` finds a person by name for `send`. A shared file shows as `[image: … · file:<id>]` and `open_file` fetches it (`files:read`): an image is shown to the model (a large one as its 1024 px thumbnail), a text file read.
 
 Reactions: a `{ reaction }` post (an emoji on the message answered), from the reply's form or, in `triage` mode,
 from the gate when the agent stays silent; only to a connector that `reacts` (Slack). An outbox row of its own kind,

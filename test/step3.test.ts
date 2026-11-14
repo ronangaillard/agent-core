@@ -28,7 +28,7 @@ test("reminder: set from a conversation, it comes back there as an event the age
     prompts.push(prompt);
     if (prompt.includes("<event>")) return { messages: ["time to call the bank"] };
     const set = tools.find((t) => t.name === "set_reminder")!;
-    assert.match(await set.run({ at: new Date(Date.now() + 150).toISOString(), note: "call the bank" }), /Reminder #1 set/);
+    assert.match(String(await set.run({ at: new Date(Date.now() + 150).toISOString(), note: "call the bank" })), /Reminder #1 set/);
     return { messages: ["noted"] };
   };
   const core = makeCore(freshDb(), connector, brain);
@@ -238,5 +238,29 @@ test("github: a signed deployment_status becomes one event in the configured con
   await sleep(50);
   assert.deepEqual(textsIn(connector, "deploys"), ["deployed!"]);
   assert.equal(core.store.events("fake:deploys").filter((e) => e.kind === "received").length, 1);
+  core.kill();
+});
+
+test("open_file: an image is shown to the model, a text file read, a binary refused", async () => {
+  const world = new World();
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const files: Record<string, { name: string; mime: string; data: Buffer }> = {
+    F1: { name: "screen.png", mime: "image/png", data: png },
+    F2: { name: "notes.txt", mime: "text/plain", data: Buffer.from("hello") },
+    F3: { name: "app.bin", mime: "application/octet-stream", data: Buffer.from([0xff, 0xfe, 0x00, 0x80]) },
+  };
+  const connector = Object.assign(new FakeConnector(world), {
+    file: async (id: string) => {
+      const file = files[id];
+      if (!file) throw new Error("not found");
+      return file;
+    },
+  });
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
+  assert.ok(core.opensFiles());
+  assert.deepEqual(await core.openFile(context(colleague), "file:F1"), { text: "screen.png (image/png)", image: { data: png.toString("base64"), mime: "image/png" } });
+  assert.match(String(await core.openFile(context(colleague), "file:F2")), /notes\.txt \(text\/plain\)\nhello/);
+  assert.match(String(await core.openFile(context(colleague), "F3")), /cannot be opened/);
+  await assert.rejects(core.openFile(context(colleague), "file:F9"), /not found/);
   core.kill();
 });

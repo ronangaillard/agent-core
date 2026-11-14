@@ -113,6 +113,8 @@ export interface Connector {
   catchUp?(since: string): AsyncIterable<unknown>;
   /** Search the whole place (not only where the agent is), with the owner's rights: the owner's tool only. */
   search?(query: string, limit: number): Promise<Found[]>;
+  /** A file shared in a conversation, by the id its messages show (file:<id>). */
+  file?(id: string): Promise<SharedFile>;
   /** It delivers { reaction } posts: the triage gate may then react where the agent stays silent. */
   reacts?: boolean;
   /** A person (name or id) → the address of a direct message with them, or null. */
@@ -140,11 +142,17 @@ export type ToolDef = {
   rules: Rule[];
   /** It changes something beyond reading (posts, writes, starts): a draft for the owner never gets it. */
   effect?: boolean;
-  run(args: Record<string, unknown>, context: ToolContext): Promise<string>;
+  run(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 };
 
+/** What a tool returns: text, or text with an image the model looks at. */
+export type ToolResult = string | { text: string; image: { data: string; mime: string } };
+
+/** A shared file, fetched: an image is shown to the model, a text file read. */
+export type SharedFile = { name: string; mime: string; data: Buffer };
+
 /** A tool bound to one respond(): its context is fixed, the model only gives the arguments. */
-export type BoundTool = { name: string; description: string; input: z.ZodRawShape; run(args: Record<string, unknown>): Promise<string> };
+export type BoundTool = { name: string; description: string; input: z.ZodRawShape; run(args: Record<string, unknown>): Promise<ToolResult> };
 
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
 /** signal: aborted when the core stops waiting (its deadline); a brain should then stop its work too. */

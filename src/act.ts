@@ -27,6 +27,17 @@ export function actTools(core: Core): ToolDef[] {
       rules: ["all"],
       run: (args, context) => core.readConversation(context, String(args.message)),
     },
+    ...(core.opensFiles()
+      ? [
+          {
+            name: "open_file",
+            description: "Open a file shared in a conversation, given its file:<id> from the message: look at an image (a screenshot, a photo), read a text file.",
+            input: { file: z.string().describe("file:<id>") },
+            rules: ["all" as const],
+            run: (args: Record<string, unknown>, context: ToolContext) => core.openFile(context, String(args.file)),
+          },
+        ]
+      : []),
     ...(core.searchable()
       ? [
           {

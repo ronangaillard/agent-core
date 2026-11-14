@@ -8,7 +8,11 @@ import { inProgress, taskTools, taskVisible, type TaskRunner } from "./tasks.ts"
 import { digest } from "./history.ts";
 import type { Memory } from "./memory.ts";
 import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type TaskRecord } from "./store.ts";
-import { TransientError, type Address, type BoundTool, type Brain, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef } from "./types.ts";
+import { TransientError, type Address, type BoundTool, type Brain, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef, type ToolResult } from "./types.ts";
+
+/** The images the model sees, and their size limit (the API's is 5 MB). */
+const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const IMAGE_MAX = 5_000_000;
 
 /** A message as the models read it: its local time, who, what. */
 const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}: ${m.text}`;
@@ -495,6 +499,27 @@ export class Core {
     return `${thread.label} [${row.thread_key}]\n${lines.join("\n")}`;
   }
 
+  /** Some connector can fetch shared files: the open_file tool exists. */
+  opensFiles(): boolean {
+    return [...this.connectors.values()].some((c) => c.file);
+  }
+
+  /** The open_file tool: an image is shown to the model, a text file read; the conversation's connector first. */
+  async openFile(context: ToolContext, ref: string): Promise<ToolResult> {
+    const id = ref.trim().replace(/^file:/, "");
+    const here = this.connectors.get(context.connector);
+    const connector = here?.file ? here : [...this.connectors.values()].find((c) => c.file);
+    if (!connector?.file || !id) return "No such file.";
+    const file = await connector.file(id);
+    if (IMAGE.has(file.mime)) {
+      if (file.data.length > IMAGE_MAX) return `${file.name}: too large to look at (${Math.round(file.data.length / 1e6)} MB).`;
+      return { text: `${file.name} (${file.mime})`, image: { data: file.data.toString("base64"), mime: file.mime } };
+    }
+    const text = file.data.toString("utf8");
+    if (!/^text\/|json|xml|yaml|csv|javascript|typescript|x-sh/.test(file.mime) && text.includes("\uFFFD")) return `${file.name}: a ${file.mime} file, it cannot be opened.`;
+    return `${file.name} (${file.mime})\n${text.length > 30_000 ? `${text.slice(0, 30_000)}\n…(cut)` : text}`;
+  }
+
   destinationNames(): string[] {
     return Object.keys(this.config.destinations);
   }
@@ -939,7 +964,7 @@ export class Core {
           this.store.trace("tool", row.thread_key, row.private, row.id, { tool: tool.name, args: cut(JSON.stringify(args)), result: cut(result), ok, ms: Date.now() - started });
         try {
           const result = await tool.run(args);
-          record(result, true);
+          record(typeof result === "string" ? result : `${result.text} [image ${result.image.mime}]`, true);
           return result;
         } catch (error) {
           record(error instanceof Error ? error.message : String(error), false);

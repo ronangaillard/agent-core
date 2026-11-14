@@ -194,7 +194,7 @@ test("digest and search: a private conversation never comes up elsewhere, except
 
   const [search] = historyTools(store, on);
   const context = { scope: colleague, threadKey: "fake:here", lotIds: [], connector: "fake", address: { connector: "fake", conversation: "here", thread: "main" } };
-  assert.match(await search!.run({ keywords: "topic" }, context), /public topic/);
+  assert.match(String(await search!.run({ keywords: "topic" }, context)), /public topic/);
   assert.equal(await search!.run({ keywords: "secret" }, context), "Nothing found.");
 
   // Privacy off (one trusted team): everything comes up everywhere, with ids and local times.
@@ -202,7 +202,7 @@ test("digest and search: a private conversation never comes up elsewhere, except
   assert.match(digest(store, "fake:here", colleague, off), /paul's secret/);
   assert.match(digest(store, "fake:here", colleague, off), /\d{4}-\d\d-\d\d \d\d:\d\d message:\d+ /);
   const [open] = historyTools(store, off);
-  assert.match(await open!.run({ keywords: "secret" }, context), /paul's secret/);
+  assert.match(String(await open!.run({ keywords: "secret" }, context)), /paul's secret/);
 });
 
 test("shelves: read-only folders anyone reads through the memory tools, never written, never in the prompt", () => {

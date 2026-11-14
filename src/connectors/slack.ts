@@ -1,6 +1,6 @@
 import bolt from "@slack/bolt";
 import { z } from "zod";
-import { TransientError, type Address, type Connector, type DeliverResult, type InboxRow, type Post, type Thread } from "../types.ts";
+import { TransientError, type Address, type Connector, type DeliverResult, type InboxRow, type Post, type SharedFile, type Thread } from "../types.ts";
 
 const { App, SocketModeReceiver, webApi } = bolt;
 
@@ -30,7 +30,7 @@ type SlackMessage = {
   thread_ts?: string;
   subtype?: string;
   /** Shared files and long pastes (snippets): their name, and the start of their text. */
-  files?: { name?: string; title?: string; preview?: string }[];
+  files?: { id?: string; name?: string; title?: string; mimetype?: string; preview?: string }[];
   /** Unfurls and bots' attachments. */
   attachments?: { pretext?: string; title?: string; text?: string; fallback?: string }[];
 };
@@ -39,6 +39,8 @@ type SlackMessage = {
 const THREAD_PAGES = 10;
 const THREAD_KEEP = 150;
 const DM_KEEP = 60;
+/** A file above this is not fetched whole (an image: its thumbnail). */
+const FILE_MAX = 3_500_000;
 
 /** Message subtypes that are real messages; edits, joins, deletions… are not. */
 const SPOKEN = new Set([undefined, "file_share", "bot_message", "thread_broadcast"]);
@@ -164,7 +166,10 @@ export function slackConnector(options: {
   /** What a message says: its text, its files (and the start of a long paste), its attachments. */
   async function readable(m: SlackMessage): Promise<string> {
     const parts = [m.text ?? ""];
-    for (const file of m.files ?? []) parts.push(`[file: ${file.title || file.name || "?"}]${file.preview ? `\n${file.preview}` : ""}`);
+    for (const file of m.files ?? []) {
+      const kind = file.mimetype?.startsWith("image/") ? "image" : "file";
+      parts.push(`[${kind}: ${file.title || file.name || "?"}${file.id ? ` · file:${file.id}` : ""}]${file.preview ? `\n${file.preview}` : ""}`);
+    }
     for (const a of m.attachments ?? []) {
       const text = [a.pretext, a.title, a.text].filter(Boolean).join("\n") || a.fallback;
       if (text) parts.push(`[attachment] ${text}`);
@@ -332,6 +337,30 @@ export function slackConnector(options: {
       } catch (error) {
         throw readError(error);
       }
+    },
+
+    async file(id: string): Promise<SharedFile> {
+      // The bot sees the files of its conversations; the owner's token those search found elsewhere.
+      for (const [by, token] of [[reader, options.botToken], ...(ownerReader ? [[ownerReader, options.userToken!] as const] : [])] as const) {
+        let info;
+        try {
+          info = (await by.files.info({ file: id })).file;
+        } catch (error) {
+          const read = readError(error);
+          if (read instanceof TransientError) throw read;
+          continue;
+        }
+        if (!info) continue;
+        // A large image: its 1024 px thumbnail, still readable, far lighter.
+        const big = (info.size ?? 0) > FILE_MAX && info.mimetype?.startsWith("image/");
+        const url = big ? info.thumb_1024 : (info.url_private_download ?? info.url_private);
+        if (!url || (!big && (info.size ?? 0) > FILE_MAX)) throw new Error(`file:${id} is too large (${Math.round((info.size ?? 0) / 1e6)} MB)`);
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (!response.ok) throw response.status >= 500 || response.status === 429 ? new TransientError(`file:${id}: HTTP ${response.status}`) : new Error(`file:${id}: HTTP ${response.status}`);
+        const mime = big ? "image/jpeg" : (info.mimetype ?? "application/octet-stream");
+        return { name: info.title || info.name || id, mime, data: Buffer.from(await response.arrayBuffer()) };
+      }
+      throw new Error(`file:${id} not found, or not visible to the agent`);
     },
 
     async read(address: Address): Promise<Thread> {
