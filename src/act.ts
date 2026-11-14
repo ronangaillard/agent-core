@@ -32,9 +32,10 @@ export function actTools(core: Core): ToolDef[] {
           {
             name: "search_messages",
             description:
-              "Search all the messages of the workspace (Slack…), not only your conversations, with the owner's rights: when something talked about likely comes from a conversation you were not in. Then read_conversation with a found:<n>.",
+              "Search all the messages of the workspace (Slack…), not only your conversations, with the owner's rights: when something talked about likely comes from a conversation you were not in, or predates what search_conversations remembers. Then read_conversation with a found:<n>.",
             input: { query: z.string().min(1).describe("Words, as in the app's search box"), limit: z.number().int().min(1).max(20).optional() },
-            rules: ["owner" as const],
+            // With the owner's rights: the owner's tool, unless privacy is off.
+            rules: [core.privacy.on ? ("owner" as const) : ("all" as const)],
             run: (args: Record<string, unknown>, context: ToolContext) => core.searchMessages(context, String(args.query), Number(args.limit ?? 10)),
           },
         ]

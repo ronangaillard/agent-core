@@ -442,9 +442,9 @@ export class Core {
     return [...this.connectors.values()].some((c) => c.search);
   }
 
-  /** The search_messages tool: every connector that can search, with the owner's rights. The owner's alone. */
+  /** The search_messages tool: every connector that can search, with the owner's rights. The owner's alone, unless privacy is off. */
   async searchMessages(context: ToolContext, query: string, limit: number): Promise<string> {
-    if (!context.scope.owner) return "Not allowed here.";
+    if (!context.scope.owner && this.config.privacy) return "Not allowed here.";
     const lines: string[] = [];
     for (const connector of this.connectors.values()) {
       if (!connector.search) continue;
@@ -463,7 +463,7 @@ export class Core {
   async readConversation(context: ToolContext, ref: string): Promise<string> {
     const hit = /^found:(\d+)$/.exec(ref.trim());
     if (hit) {
-      const found = context.scope.owner ? this.found.get(Number(hit[1])) : undefined;
+      const found = context.scope.owner || !this.config.privacy ? this.found.get(Number(hit[1])) : undefined;
       const connector = found && this.connectors.get(found.connector);
       if (!found || !connector) return "No such message (found:<n> refs last until a restart).";
       const thread = await connector.read(found.address);

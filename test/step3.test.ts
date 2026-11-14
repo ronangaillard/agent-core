@@ -192,6 +192,11 @@ test("search_messages: the whole workspace, the owner's alone, and found:<n> rea
   assert.match(await core.readConversation(context(colleague), "found:1"), /No such message/);
   assert.equal(await core.searchMessages(context(owner), "nothing", 5), "Nothing found.");
   core.kill();
+  // Privacy off: anyone searches, and reads what was found.
+  const loose = makeCore(freshDb(), searchable, echoBrain().brain, { privacy: false });
+  assert.match(await loose.searchMessages(context(colleague), "budget", 5), /found:1/);
+  assert.match(await loose.readConversation(context(colleague), "found:1"), /paul: the budget is 40k/);
+  loose.kill();
 });
 
 test("jobs: run on their schedule, invisible to the tools; a job gone from the code is dropped", async () => {

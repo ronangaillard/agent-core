@@ -93,7 +93,7 @@ Step 2, done: engagement modes per place (`mention`, `mention-sticky`, `triage` 
 reset by a human), the catch-up from a cursor frozen before connecting and at disconnection, tools with rules
 checked twice, the Markdown memory, the `<elsewhere>` digest and the conversation search with the privacy rule (local times, `message:<id>` on
 each line), and `read_conversation`, which reads the whole conversation of a `message:<id>` under the same rule.
-`search_messages` (the owner's alone, when a connector can `search`: Slack with `SLACK_USER_TOKEN` and `search:read`)
+`search_messages` (the owner's alone unless `AGENT_PRIVACY=off`, when a connector can `search`: Slack with `SLACK_USER_TOKEN` and `search:read`)
 searches the whole workspace with the owner's rights; `read_conversation` reads a hit's conversation (`found:<n>`).
 
 Step 3, done:
