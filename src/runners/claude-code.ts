@@ -80,7 +80,14 @@ async function syncFromCopy(vault: string, dir: string, branch: string) {
  * branch, kept for the next runs. The copy holds no token and no link to the remote. Returns the branch's last
  * commits, and when someone else pushed to the branch, a bundle of the remote branch for the session to merge.
  */
-export async function prepareCopy(dir: string, vault: string, remote: string, branch: string, token: string): Promise<{ log: string; upstream?: string }> {
+export async function prepareCopy(
+  dir: string,
+  vault: string,
+  remote: string,
+  branch: string,
+  token: string,
+  options: { restartEmpty?: boolean } = {},
+): Promise<{ log: string; upstream?: string }> {
   if (!existsSync(join(vault, "HEAD"))) {
     rmSync(vault, { recursive: true, force: true });
     mkdirSync(vault, { recursive: true });
@@ -97,6 +104,13 @@ export async function prepareCopy(dir: string, vault: string, remote: string, br
     await git(["checkout", "--quiet", "-B", branch, ...(pushed ? [`origin/${branch}`] : [])], { cwd: dir });
   } else {
     await syncFromCopy(vault, dir, branch).catch(() => undefined);
+    // No commit of its own yet: the branch starts again from the remote's default branch as it is now (a copy left
+    // on an old main would work on stale code). The copy goes; its leftovers had no commit.
+    if (options.restartEmpty && (await withoutOwnCommits(vault, remote, branch, token))) {
+      await git(["update-ref", "-d", `refs/heads/${branch}`], { cwd: vault });
+      rmSync(dir, { recursive: true, force: true });
+      return prepareCopy(dir, vault, remote, branch, token);
+    }
   }
   const log = await git(["log", "--oneline", "-5", `refs/heads/${branch}`], { cwd: vault }).catch(() => "");
   // The remote branch moved (a suggestion committed on the PR): its commits, as a file the session can fetch.
@@ -115,6 +129,21 @@ export async function prepareCopy(dir: string, vault: string, remote: string, br
   rmSync(bundle, { force: true });
   await git(["bundle", "create", "--quiet", bundle, upstream], { cwd: vault });
   return { log, upstream: bundle };
+}
+
+/** The branch, in the vault, is behind (or at) the remote's default branch, fetched now; never pushed. */
+async function withoutOwnCommits(vault: string, remote: string, branch: string, token: string): Promise<boolean> {
+  try {
+    const main = await git(["symbolic-ref", "--short", "HEAD"], { cwd: vault });
+    if (main === branch) return false;
+    const pushed = await git(["ls-remote", "--heads", remote, branch], { cwd: vault, token });
+    if (pushed) return false;
+    await git(["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${main}:refs/heads/${main}`], { cwd: vault, token });
+    await git(["merge-base", "--is-ancestor", `refs/heads/${branch}`, `refs/heads/${main}`], { cwd: vault });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Only the task's branch, from the vault, to the remote named here: nothing in the copy decides where it goes. */
@@ -242,7 +271,8 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const vault = join(vaults, `task-${task.id}.git`);
     const remote = `${base}/${task.repo}.git`;
     const token = tokenFor(task.repo, options.githubToken, options.githubTokens);
-    const prepared = await prepareCopy(dir, vault, remote, task.branch, token);
+    // A run asked again (not one a restart cut, whose copy may hold work in progress) restarts an empty branch.
+    const prepared = await prepareCopy(dir, vault, remote, task.branch, token, { restartEmpty: !run.resumed });
     const { log } = prepared;
     let upstream = prepared.upstream;
     // The remote container sees the copy only: the bundle goes into it (its .git, never committed).
@@ -334,7 +364,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           .filter(Boolean)
           .join("\n\n"),
         options: {
-          systemPrompt: `${options.persona}\n\nYou are doing a code task in your own copy of ${task.repo}. Read the code and follow its conventions, make a focused change, run the project's checks, commit, then push_branch and open_pr. Never merge, never push elsewhere: it is enforced. Give news with progress on long tasks. End with a short report.${remoteTerminal ? " Your terminal is the terminal tool (a container with only your copy); read and change files with Read, Edit, Write, Glob, Grep." : ""}`,
+          systemPrompt: `${options.persona}\n\nYou are doing a code task in your own copy of ${task.repo}. Read the code and follow its conventions, make a focused change, run the project's checks, commit, then push_branch and open_pr. Never merge, never push elsewhere: it is enforced. The copy has no network to GitHub: its origin is a local repository your terminal cannot read, so never git fetch, pull or ls-remote; push_branch pushes and open_pr opens the PR for you. Give news with progress on long tasks. End with a short report.${remoteTerminal ? " Your terminal is the terminal tool (a container with only your copy); read and change files with Read, Edit, Write, Glob, Grep." : ""}`,
           cwd: dir,
           ...(options.model ? { model: options.model } : {}),
           ...(options.executable ? { pathToClaudeCodeExecutable: options.executable } : {}),

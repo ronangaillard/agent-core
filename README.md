@@ -132,10 +132,12 @@ Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
   number, it continues that task from anywhere it is visible (same privacy rule as the digest), and reports in the
   task's own conversation. A running task is changed only by its requester or the owner; the rights of a
   continuation are the lesser of the task's and the requester's. One task runs at a time; a replaced run says
-  nothing.
+  nothing. With several repositories, a new task must name one (`repo`); with one, it is the default.
+- `abandon_code_task`: stops a task for good (same rights as changing it); its run is cut, its copy and branch stay.
 - Reports and progress notes (at most 5, spaced out) go to the task's conversation as outbox `report` rows; a failure
-  is a one-line "blocked" report and an alert. A task a restart cut runs again (twice at most), then is abandoned
-  with a word.
+  is a one-line report and an alert, and the task is `failed`: still open, asking again resumes it. A task a restart
+  cut runs again (twice at most), then fails with a word. A run asked again on a branch with no commit of its own
+  starts over from the remote's default branch as it is now.
 - `<in_progress>` in every prompt: open tasks and those done within 7 days, upcoming reminders, and for the owner
   what waits for him.
 - The Claude Code runner: the token stays in this process, in a vault (a bare repository per task, outside the

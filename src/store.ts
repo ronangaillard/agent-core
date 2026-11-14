@@ -58,7 +58,8 @@ const reminderOf = (r: Row): ReminderRecord => ({
   private: Boolean(r.private),
 });
 
-export type TaskStatus = "running" | "waiting" | "done" | "abandoned";
+/** failed: the last run failed; it stays open (continued like a waiting one). abandoned: stopped for good. */
+export type TaskStatus = "running" | "waiting" | "failed" | "done" | "abandoned";
 
 export type TaskRecord = {
   id: number;
@@ -273,15 +274,15 @@ export class Store {
     return row ? taskOf(row) : undefined;
   }
 
-  /** Running or waiting in this conversation. */
+  /** Running, waiting or failed in this conversation. */
   openTasks(threadKey: string): TaskRecord[] {
-    return (this.db.prepare("SELECT * FROM tasks WHERE thread_key = ? AND status IN ('running', 'waiting') ORDER BY id").all(threadKey) as Row[]).map(taskOf);
+    return (this.db.prepare("SELECT * FROM tasks WHERE thread_key = ? AND status IN ('running', 'waiting', 'failed') ORDER BY id").all(threadKey) as Row[]).map(taskOf);
   }
 
-  /** Running or waiting anywhere, and those finished since this date: newest first. */
+  /** Open anywhere (running, waiting, failed), and those done since this date: newest first. */
   recentTasks(since: string): TaskRecord[] {
     return (
-      this.db.prepare("SELECT * FROM tasks WHERE status IN ('running', 'waiting') OR (status = 'done' AND updated_at >= ?) ORDER BY updated_at DESC LIMIT 20").all(since) as Row[]
+      this.db.prepare("SELECT * FROM tasks WHERE status IN ('running', 'waiting', 'failed') OR (status = 'done' AND updated_at >= ?) ORDER BY updated_at DESC LIMIT 20").all(since) as Row[]
     ).map(taskOf);
   }
 

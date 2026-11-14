@@ -53,14 +53,14 @@ repo        TEXT   a listed repo (AGENT_REPOS)
 branch      TEXT   agent/12-export-csv
 request     TEXT   the latest request
 pr          INTEGER
-status      running | waiting | done | abandoned
+status      running | waiting | failed | done | abandoned
 requester   TEXT   Slack id of the requester
 owner_asked 0/1    owner task rights (prod…)
 private · resumes · created_at · updated_at
 
 one task = one copy, one branch, one PR</span></span></div>
 
-<div style="position: absolute; left: 1212px; top: 540px; width: 320px; height: 200px; box-sizing: border-box; padding: 14px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #B85C1E; border-radius: 10px"><span><b>Resume task #12</b><br>same copy, branch, pr; one task at a time; scope = min(task, requester)<br><span style="color: #5E5E58">changed only by the requester, the owner or in its conversation; running: abort then restart; cut by a reboot: restarted at most 2 times, then abandoned + report</span></span></div>
+<div style="position: absolute; left: 1212px; top: 540px; width: 320px; height: 200px; box-sizing: border-box; padding: 14px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #B85C1E; border-radius: 10px"><span><b>Resume task #12</b><br>same copy, branch, pr; one task at a time; scope = min(task, requester)<br><span style="color: #5E5E58">changed only by the requester, the owner or in its conversation; running: abort then restart; cut by a reboot: restarted at most 2 times, then failed + report</span></span></div>
 <div style="position: absolute; left: 1588px; top: 540px; width: 380px; height: 200px; box-sizing: border-box; padding: 14px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b>Session Claude Code</b> (runner)<br>prompt: request + thread + <span style="color: #B85C1E">branch state (git log, PR); commits pushed by others: a bundle to merge</span><br><span style="color: #5E5E58">tools: file tools in the copy (never .git), sandboxed terminal, progress, push_branch, open_pr; a missing permission is denied</span></span></div>
 <div style="position: absolute; left: 2064px; top: 620px; width: 360px; height: 160px; box-sizing: border-box; padding: 14px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b>Claude Code sandbox</b><br>writes only in the copy, nothing from the agent's folder or the vault<br><span style="color: #5E5E58">no token, network → registries; on the NAS: to be wired to the workshop</span></span></div>
 <div style="position: absolute; left: 1588px; top: 860px; width: 380px; height: 160px; box-sizing: border-box; padding: 14px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #B85C1E; border-radius: 10px"><span><b>Back to the conversation</b><br>progress (at most 5, spaced out) and final report → outbox report to tasks.address (no respond, no inbox)<br><span style="color: #5E5E58">failure: a "blocked: …" line + alert; PR events: later, optional</span></span></div>

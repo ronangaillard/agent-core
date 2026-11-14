@@ -584,6 +584,8 @@ export class Core {
     }
     const from = threadOf(context.address);
     if (!task) {
+      // With several repositories, which one is never guessed.
+      if (!ask.repo && this.config.repos.length > 1) return `Which repository? Give repo, one of: ${this.config.repos.join(", ")}. Nothing was started.`;
       const repo = ask.repo ?? this.config.repos[0];
       if (!repo || !this.config.repos.includes(repo)) return `Not a repository you work on. Allowed: ${this.config.repos.join(", ")}.`;
       const created = this.store.createTask({
@@ -613,12 +615,39 @@ export class Core {
     return `Task #${task.id} continues on its copy and branch${task.pr ? ` (PR #${task.pr})` : ""}. The report will come in ${where}.`;
   }
 
-  /** Tasks a restart cut: run again, at most maxTaskResumes times, then abandoned with a word in their conversation. */
+  /**
+   * The abandon_code_task tool: the task named (if visible from here), else the only one open in this conversation.
+   * Same rights as changing it. Its run is cut (the runner closes what it opened); the copy and branch stay.
+   */
+  async abandonTask(context: ToolContext, ask: { task?: number }): Promise<string> {
+    const { scope } = context;
+    const visible = (task: TaskRecord) => task.thread_key === context.threadKey || taskVisible(task, scope, this.privacy);
+    let task: TaskRecord | undefined;
+    if (ask.task !== undefined) {
+      task = this.store.task(ask.task);
+      if (!task || !visible(task)) return `No task #${ask.task}.`;
+    } else {
+      const open = this.store.openTasks(context.threadKey).filter(visible);
+      if (open.length > 1) return `Several tasks are open here: ${open.map((t) => `#${t.id} "${t.title}"`).join(", ")}. Say which one (task).`;
+      task = open[0];
+      if (!task) return "No open task here: say which one (task).";
+    }
+    if (task.status === "abandoned") return `Task #${task.id} is already abandoned.`;
+    if (!scope.owner && scope.requester !== task.requester && task.thread_key !== context.threadKey) {
+      return `Task #${task.id} was asked by someone else: only they, the owner, or its own conversation can abandon it.`;
+    }
+    this.runs.get(task.id)?.abort();
+    this.runs.delete(task.id);
+    this.store.updateTask(task.id, { status: "abandoned" }, `Task #${task.id} abandoned.`);
+    return `Task #${task.id} abandoned${task.pr ? ` (PR #${task.pr} stays open on GitHub)` : ""}.`;
+  }
+
+  /** Tasks a restart cut: run again, at most maxTaskResumes times, then failed with a word in their conversation. */
   private resumeTasks() {
     if (!this.options.runner) return;
     for (const task of this.store.tasksWith("running")) {
       if (task.resumes >= this.config.maxTaskResumes) {
-        this.store.updateTask(task.id, { status: "abandoned" }, `Task #${task.id} blocked: cut by restarts too many times. Ask again to resume it.`);
+        this.store.updateTask(task.id, { status: "failed" }, `Task #${task.id} blocked: cut by restarts too many times. Ask again to resume it.`);
         continue;
       }
       this.store.updateTask(task.id, { resumes: task.resumes + 1 });
@@ -659,7 +688,8 @@ export class Core {
       } catch (error) {
         if (over()) return;
         const message = error instanceof Error ? error.message : String(error);
-        this.store.updateTask(task.id, { status: this.store.task(task.id)?.pr ? "waiting" : "done" }, `Task #${task.id} blocked: ${message}`, `Code task #${task.id} failed: ${message}`);
+        // Not done: it stays open, and asking again resumes it on its copy and branch.
+        this.store.updateTask(task.id, { status: "failed" }, `Task #${task.id} failed: ${message}. Ask again to resume it.`, `Code task #${task.id} failed: ${message}`);
       } finally {
         if (this.runs.get(task.id) === abort) this.runs.delete(task.id);
         if (!this.stopped) this.wake();

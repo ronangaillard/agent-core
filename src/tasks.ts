@@ -68,7 +68,7 @@ export function taskTools(core: Core, repos: string[]): ToolDef[] {
         title: z.string().max(60).optional().describe("A few words, for a new task"),
         task: z.number().int().optional().describe("The number of the task to continue"),
         new: z.boolean().optional().describe("Start another task even if one is open here"),
-        repo: z.string().optional().describe(`For a new task; default ${repos[0] ?? "none"}`),
+        repo: z.string().optional().describe(repos.length > 1 ? `For a new task, required: one of ${repos.join(", ")}` : `For a new task; default ${repos[0] ?? "none"}`),
       },
       rules: ["all"],
       effect: true,
@@ -80,6 +80,14 @@ export function taskTools(core: Core, repos: string[]): ToolDef[] {
           fresh: Boolean(args.new),
           ...(args.repo ? { repo: String(args.repo) } : {}),
         }),
+    },
+    {
+      name: "abandon_code_task",
+      description: "Stop a code task for good: its run is cut, its copy and branch stay (a PR stays open on GitHub). Find it in <in_progress> and pass its number as task; in the conversation where it was asked, it is automatic.",
+      input: { task: z.number().int().optional().describe("The number of the task to abandon") },
+      rules: ["all"],
+      effect: true,
+      run: (args, context) => core.abandonTask(context, { ...(args.task !== undefined ? { task: Number(args.task) } : {}) }),
     },
   ];
 }
