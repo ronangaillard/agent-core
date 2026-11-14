@@ -42,7 +42,8 @@ a{color:#2457C5}a:hover{color:#1A3F91}
   payload: unknown;  text?: string;  caught_up?: boolean;  <span style="color: #6B6B65">// text: owner commands, system events</span>
 };
 
-<span style="color: #2457C5">type</span> Post = { text: string; as?: "owner" };  <span style="color: #6B6B65">// as owner: approved draft, posted with their token</span>
+<span style="color: #2457C5">type</span> Post = { text: string; as?: "owner" }  <span style="color: #6B6B65">// as owner: approved draft, posted with their token</span>
+  | { reaction: string };                      <span style="color: #6B6B65">// an emoji on address.ts, to a connector that reacts</span>
 
 <span style="color: #2457C5">type</span> DeliverResult =
   | { ok: true; ref: string; sent_at: string; link?: string }  <span style="color: #6B6B65">// ref: ts or Resend id</span>
@@ -57,10 +58,12 @@ a{color:#2457C5}a:hover{color:#1A3F91}
   resolve?(person: string): Promise&lt;Address | null&gt;;  <span style="color: #6B6B65">// a person → their DM; named destinations = config</span>
   threadKeyOf?(address: Address): string;    <span style="color: #6B6B65">// the thread_key of its rows for this address</span>
   form: { schema(row: InboxRow, scope: Scope): ZodType;
-          guide(row: InboxRow, scope: Scope): string;
+          prompts: Record&lt;string, string&gt;;  <span style="color: #6B6B65">// its prompt files, with defaults</span>
+          guide(row, scope): { prompt: string; vars? };  <span style="color: #6B6B65">// which one</span>
           toPosts(output: unknown): { posts: Post[]; held: boolean; note?: string } };
   deliver(address: Address, post: Post): Promise&lt;DeliverResult&gt;;  <span style="color: #6B6B65">// the core owns retries</span>
-  typing?(address: Address): Promise&lt;void&gt;;
+  typing?(address: Address): Promise&lt;void&gt;;  reacts?: boolean;
+  search?(query: string, limit: number): Promise&lt;Found[]&gt;;  <span style="color: #6B6B65">// with the owner's rights</span>
   onConnected?(cb: () =&gt; void): void;  onDisconnected?(cb: () =&gt; void): void;
 }</div>
 </div>

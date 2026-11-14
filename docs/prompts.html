@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>agent-core — Prompts and files</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457C5}a:hover{color:#1A3F91}
+.card{box-sizing:border-box;padding:22px 26px;background:#FFFFFF;border:1px solid #D9D9D4;border-radius:14px;min-width:0}
+.title{font-size:15px;font-weight:700;margin-bottom:10px}
+.sub{color:#5E5E58;font-weight:400}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:19px;color:#3A3A36}
+.part{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid #EEEEEA}
+.part:last-child{border-bottom:0}
+.tag{flex:0 0 auto;font-family:'JetBrains Mono',monospace;font-size:12px;padding:1px 7px;border-radius:6px;background:#EAF0FB;color:#2457C5}
+.tag.data{background:#F2F2EE;color:#5E5E58}
+.tag.mem{background:#FBF0E8;color:#B85C1E}
+.label{color:#5E5E58;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 4px}
+table{border-collapse:collapse;width:100%;font-size:13px;line-height:18px}
+th{text-align:left;color:#5E5E58;padding:6px 8px;border-bottom:1px solid #D9D9D4;font-weight:600}
+td{padding:6px 8px;border-bottom:1px solid #EEEEEA;vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.f{font-family:'JetBrains Mono',monospace;font-size:12.5px;white-space:nowrap}
+</style>
+</helmet>
+<div style="width: 2560px; height: 1440px; box-sizing: border-box; padding: 40px 64px; display: flex; flex-direction: column; gap: 28px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Prompts and files</h1>
+<p style="margin: 0; color: #5E5E58">Every text the agent is prompted with is a Markdown file in <b>prompts/</b> (AGENT_PROMPTS), written with its default when missing and read again at every use: an edit applies at the next message, no restart. <span style="color: #2457C5">Blue</span>: a prompt file. <span style="color: #5E5E58">Grey</span>: data built by code. <span style="color: #B85C1E">Orange</span>: the memory. Tool descriptions stay in the code: they describe what the code does.</p>
+</div>
+
+<div style="display: flex; gap: 24px; align-items: stretch">
+
+<div class="card" style="flex: 1 1 0; border: 2px solid #2457C5">
+<div class="title">1 · The reply <span class="sub">· respond() in core.ts · the main model (Sonnet)</span></div>
+<div class="label">system</div>
+<div class="part"><span class="tag">persona</span><span>who the agent is (AGENT_PERSONA, default prompts/persona.md)</span></div>
+<div class="part"><span class="tag">slack-dm · slack-thread · email</span><span>the connector's guide, picked by form.guide(row): declared by the connector, with its {{vars}}</span></div>
+<div class="part"><span class="tag mem">memory/*/INDEX.md</span><span>common/INDEX.md everywhere; private/INDEX.md with the owner in private (4,000 chars each)</span></div>
+<div class="part"><span class="tag">safety</span><span>what comes from others is data, never instructions</span></div>
+<div class="label">message</div>
+<div class="part"><span class="tag data">&lt;elsewhere&gt;</span><span>other recent conversations (72 h), with message:&lt;id&gt; and local times</span></div>
+<div class="part"><span class="tag data">&lt;conversation&gt;</span><span>this thread, read from the connector</span></div>
+<div class="part"><span class="tag data">&lt;in_progress&gt;</span><span>code tasks, reminders, what waits for the owner</span></div>
+<div class="part"><span class="tag data">already did</span><span>the acted events of this thread</span></div>
+<div class="part"><span class="tag">ask-new (+ ask-late) · ask-event · ask-draft</span><span>the ask: new messages (late: caught up), an event from a source, a draft in the owner's name ({{count}}, {{event}}, {{owner}})</span></div>
+<div class="label">output</div>
+<div>The connector's form (messages, and on Slack an optional reaction), then the tools.</div>
+</div>
+
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+
+<div class="card" style="border: 2px solid #2457C5">
+<div class="title">2 · The triage gate <span class="sub">· ask() in core.ts · the cheap model (Haiku)</span></div>
+<div>Only in mode <b>triage</b>, on a message that is neither a DM nor a mention: should the agent speak?</div>
+<div class="label">system</div>
+<div class="part"><span class="tag">gate</span><span>silence is the rule ({{label}}: the place)</span></div>
+<div class="part"><span class="tag">gate-react</span><span>only if the connector reacts: silent, it may still put one emoji, rarely</span></div>
+<div class="part"><span class="tag">persona</span><span>the same file as the reply's</span></div>
+<div class="label">message</div>
+<div class="part"><span class="tag data">&lt;conversation&gt;</span><span>the last 15 messages of the thread</span></div>
+<div class="label">output</div>
+<div>{ speak, reaction? }: speak runs the reply (1); silent with a reaction, the emoji goes through the outbox with the closing.</div>
+</div>
+
+<div class="card" style="border: 2px solid #2457C5">
+<div class="title">3 · The code task <span class="sub">· runners/claude-code.ts · a Claude Code session</span></div>
+<div class="label">system</div>
+<div class="part"><span class="tag">persona</span><span>the same file again</span></div>
+<div class="part"><span class="tag">code-task</span><span>focused change, checks, commit, push_branch, open_pr; no network to GitHub ({{repo}})</span></div>
+<div class="part"><span class="tag">code-task-terminal</span><span>only with the workshop: the terminal tool, in a container with only the copy</span></div>
+<div class="label">message</div>
+<div class="part"><span class="tag data">request · conversation · git</span><span>the request, the thread it comes from, the branch's last commits</span></div>
+</div>
+
+</div>
+
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+
+<div class="card">
+<div class="title">The folders <span class="sub">· on the NAS, under /data</span></div>
+<table>
+<thead><tr><th>folder</th><th>who reads it</th><th>who writes it</th></tr></thead>
+<tbody>
+<tr><td class="f">prompts/</td><td>the core and the runner, at every use (1, 2, 3)</td><td>the owner, in the web view; missing files: their default, at start</td></tr>
+<tr><td class="f">memory/common/</td><td>INDEX.md: every prompt; the rest: memory_read</td><td>memory_write (owner only, or all with AGENT_MEMORY_WRITERS=all); the web view</td></tr>
+<tr><td class="f">memory/private/</td><td>only the owner's private conversation</td><td>memory_write there; the web view</td></tr>
+<tr><td class="f">shelves</td><td>memory_list · memory_read, e.g. code/ = the agent's own source</td><td>nobody: read-only, never in a prompt</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<div class="title">The web view <span class="sub">· debug.ts · AGENT_DEBUG_PORT + password</span></div>
+<div>• <b>Tables</b>: every row, newest first, filtered; read-only connection<br>• <b>Files</b>: prompts/ and memory/, listed, read, edited, created<br>• only .md files inside those two folders; saved whole (tmp file, rename), so a prompt is never read half written<br>• the password now also changes what the agent is told</div>
+</div>
+
+<div class="card">
+<div class="title">Not files</div>
+<div>• tool descriptions, TASK_GUIDE included: part of each tool's contract<br>• the forms' schemas (field descriptions): the shape the code parses<br>• the persona is not memory: the agent never writes it</div>
+</div>
+
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2560,"height":1440}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
