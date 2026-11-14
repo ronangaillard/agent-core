@@ -35,6 +35,7 @@ tokens come from the environment.
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
 | `src/sources/github.ts` | GitHub deployments: a signed webhook, and a pass at start for what was missed |
+| `src/debug.ts` | A read-only web view of the tables, behind a password (debugging) |
 | `src/main.ts` | Startup |
 
 ## Run
@@ -50,7 +51,8 @@ Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `A
 DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
 `AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
-`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_SHELVES` (JSON, name → folder: read-only
+`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no debug view: a read-only web view of
+the tables, basic auth with user `debug`; the tables hold private conversations), `AGENT_SHELVES` (JSON, name → folder: read-only
 folders the memory tools also read, for everyone, never written nor put in the prompt; e.g. `{"code":"/app/src"}`
 lets the agent read its own source, the version running).
 

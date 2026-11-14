@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { leftChannel } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
+import { debugServer } from "../src/debug.ts";
 import { digest } from "../src/history.ts";
 import { Memory } from "../src/memory.ts";
 import { ownerCommands } from "../src/owner.ts";
@@ -250,4 +251,28 @@ test("memory: a write is whole or not at all, and leaves no temp file", () => {
   memory.write("common/INDEX.md", "v2", owner);
   assert.equal(memory.read("common/INDEX.md", owner), "v2");
   assert.deepEqual(readdirSync(join(memory.root, "common")), ["INDEX.md"]);
+});
+
+test("debug view: password required, read-only, tables listed, rows filtered and escaped", async () => {
+  const path = freshDb();
+  const store = new Store(openDb(path));
+  const world = new World();
+  store.ingest({ ...world.say("<script>alert(1)</script> budget"), source_id: "x:1" }, "fake");
+  store.ingest({ ...world.say("lunch"), source_id: "x:2" }, "fake");
+  const debug = debugServer({ dbPath: path, port: 0, password: "pw" });
+  const server = await debug.start();
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const auth = { authorization: `Basic ${Buffer.from("debug:pw").toString("base64")}` };
+  assert.equal((await fetch(`${base}/`)).status, 401);
+  assert.equal((await fetch(`${base}/`, { headers: { authorization: `Basic ${Buffer.from("debug:no").toString("base64")}` } })).status, 401);
+  const home = await (await fetch(`${base}/`, { headers: auth })).text();
+  assert.match(home, /href="\/t\/inbox">inbox<\/a><\/td><td>2</);
+  const filtered = await (await fetch(`${base}/t/inbox?q=budget`, { headers: auth })).text();
+  assert.match(filtered, /1 rows/);
+  assert.doesNotMatch(filtered, /<script>alert/);
+  assert.match(filtered, /&lt;script&gt;/);
+  assert.equal((await fetch(`${base}/t/sqlite_master`, { headers: auth })).status, 404);
+  assert.equal((await fetch(`${base}/t/inbox%3B%20DROP%20TABLE%20inbox`, { headers: auth })).status, 404);
+  assert.equal(store.inbox(1)?.source_id, "x:1");
+  await debug.stop();
 });

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { claudeBrain } from "./claude.ts";
 import { emailConnector } from "./connectors/email.ts";
+import { debugServer } from "./debug.ts";
 import { slackConnector } from "./connectors/slack.ts";
 import { Core, defaultConfig } from "./core.ts";
 import { openDb } from "./db.ts";
@@ -63,7 +64,14 @@ const runner =
       })
     : undefined;
 
-const db = openDb(process.env.AGENT_DB ?? "data/agent.db");
+const dbPath = process.env.AGENT_DB ?? "data/agent.db";
+const db = openDb(dbPath);
+
+/** A read-only web view of the tables: off unless both are set (the tables hold private conversations). */
+const debug =
+  process.env.AGENT_DEBUG_PORT && process.env.AGENT_DEBUG_PASSWORD
+    ? debugServer({ dbPath, port: Number(process.env.AGENT_DEBUG_PORT), password: process.env.AGENT_DEBUG_PASSWORD })
+    : undefined;
 /** AGENT_SHELVES: read-only folders the memory tools also read, e.g. {"code":"/app/src"} (the agent's own source). */
 const shelves = JSON.parse(process.env.AGENT_SHELVES ?? "{}") as Record<string, string>;
 const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves);
@@ -108,10 +116,11 @@ const github =
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.all([core.stop(), github?.stop()]).finally(() => process.exit(0));
+    void Promise.all([core.stop(), github?.stop(), debug?.stop()]).finally(() => process.exit(0));
   });
 }
 
 await core.start();
 await github?.start();
+await debug?.start();
 console.log("agent-core started");
