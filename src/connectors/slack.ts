@@ -131,6 +131,23 @@ export function slackConnector(options: { botToken: string; appToken: string; ow
       }
     },
 
+    /** A Slack id, or a name matched on display name, real name or handle; then the direct message with them. */
+    async resolve(person) {
+      const wanted = person.replace(/^@/, "").toLowerCase();
+      let user = /^[UW][A-Z0-9]+$/.test(person) ? person : undefined;
+      let cursor: string | undefined;
+      while (!user) {
+        const page = await client.users.list({ limit: 500, ...(cursor ? { cursor } : {}) });
+        const found = page.members?.find((m) => !m.deleted && [m.profile?.display_name, m.real_name, m.name].some((n) => n?.toLowerCase() === wanted));
+        user = found?.id;
+        cursor = page.response_metadata?.next_cursor || undefined;
+        if (!cursor) break;
+      }
+      if (!user) return null;
+      const opened = await client.conversations.open({ users: user });
+      return opened.channel?.id ? { connector: "slack", conversation: opened.channel.id, thread: "main" } : null;
+    },
+
     async toInbox(raw): Promise<InboxRow | null> {
       const event = raw as SlackMessage;
       if (!event.channel || !event.ts || !SPOKEN.has(event.subtype)) return null;

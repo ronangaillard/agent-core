@@ -126,7 +126,7 @@ test("tools: the model only sees what the scope allows, and each tool checks aga
   const connector = new FakeConnector(world);
   const seen: string[][] = [];
   const brain: Brain = async ({ tools = [] }) => {
-    seen.push(tools.map((t) => t.name).sort());
+    seen.push(tools.map((t) => t.name).filter((name) => !["send", "set_reminder", "list_reminders", "cancel_reminder"].includes(name)).sort());
     return { messages: ["ok"] };
   };
   const tools: ToolDef[] = [
@@ -142,7 +142,7 @@ test("tools: the model only sees what the scope allows, and each tool checks aga
   assert.deepEqual(seen, [["prod_query", "read_notes"], ["read_notes"]]);
   core.kill();
 
-  const context = { scope: { ...owner }, threadKey: "t", lotIds: [1] };
+  const context = { scope: { ...owner }, threadKey: "t", lotIds: [1], connector: "fake", address: { connector: "fake", conversation: "t", thread: "main" } };
   const [prod] = bind(tools, context);
   context.scope.owner = false;
   await assert.rejects(() => prod!.run({}), /not allowed/);
@@ -183,7 +183,7 @@ test("digest and search: a private conversation never comes up elsewhere, except
   assert.doesNotMatch(forColleague, /owner's plan/);
 
   const [search] = historyTools(store, "ronan");
-  const context = { scope: colleague, threadKey: "fake:here", lotIds: [] };
+  const context = { scope: colleague, threadKey: "fake:here", lotIds: [], connector: "fake", address: { connector: "fake", conversation: "here", thread: "main" } };
   assert.match(await search!.run({ keywords: "topic" }, context), /public topic/);
   assert.equal(await search!.run({ keywords: "secret" }, context), "Nothing found.");
 });

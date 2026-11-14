@@ -30,6 +30,34 @@ export type OutboxRecord = {
 
 type Row = Record<string, SQLInputValue>;
 
+export type ReminderRecord = {
+  id: number;
+  kind: "reminder" | "job";
+  job: string | null;
+  due_at: string;
+  repeat_minutes: number | null;
+  note: string;
+  connector: string | null;
+  address: Address | null;
+  thread_key: string | null;
+  created_by: string | null;
+  private: boolean;
+};
+
+const reminderOf = (r: Row): ReminderRecord => ({
+  id: Number(r.id),
+  kind: String(r.kind) as ReminderRecord["kind"],
+  job: r.job === null ? null : String(r.job),
+  due_at: String(r.due_at),
+  repeat_minutes: r.repeat_minutes === null ? null : Number(r.repeat_minutes),
+  note: String(r.note),
+  connector: r.connector === null ? null : String(r.connector),
+  address: r.address === null ? null : (JSON.parse(String(r.address)) as Address),
+  thread_key: r.thread_key === null ? null : String(r.thread_key),
+  created_by: r.created_by === null ? null : String(r.created_by),
+  private: Boolean(r.private),
+});
+
 const inboxOf = (r: Row): InboxRecord => ({
   id: Number(r.id),
   source_id: String(r.source_id),
@@ -90,7 +118,12 @@ export class Store {
 
   /** The durable write before any slow work. A duplicate (catch-up, retry) changes nothing: null. */
   ingest(row: InboxRow, connector: string): number | null {
-    return tx(this.db, () => {
+    return tx(this.db, () => this.insertInbox(row, connector));
+  }
+
+  /** Inside a transaction already open. */
+  private insertInbox(row: InboxRow, connector: string): number | null {
+    {
       const result = this.db
         .prepare(
           `INSERT OR IGNORE INTO inbox (source_id, thread_key, mode_key, connector, address, author_id, author_kind, owner_only, private, dm,
@@ -106,6 +139,95 @@ export class Store {
       const id = Number(result.lastInsertRowid);
       this.event({ kind: "received", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: id });
       return id;
+    }
+  }
+
+  // --- reminders and jobs --------------------------------------------------------------------------------------
+
+  addReminder(r: { due_at: string; repeat_minutes: number | null; note: string; connector: string; address: Address; thread_key: string; created_by: string; private: boolean }): number {
+    return tx(this.db, () => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO reminders (kind, due_at, repeat_minutes, note, connector, address, thread_key, created_by, private, created_at)
+           VALUES ('reminder', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(r.due_at, r.repeat_minutes, r.note, r.connector, JSON.stringify(r.address), r.thread_key, r.created_by, r.private ? 1 : 0, now());
+      const id = Number(result.lastInsertRowid);
+      this.event({ kind: "reminder_set", thread_key: r.thread_key, author_id: r.created_by, private: r.private, ref: id, payload: { note: r.note, due_at: r.due_at } });
+      return id;
+    });
+  }
+
+  /** A job: a named function on a schedule, never visible to the tools. Set again at each start, same name. */
+  setJob(name: string, dueAt: string, repeatMinutes: number | null) {
+    this.db
+      .prepare(
+        `INSERT INTO reminders (kind, job, due_at, repeat_minutes, note, created_at) VALUES ('job', ?, ?, ?, '', ?)
+         ON CONFLICT(job) DO UPDATE SET repeat_minutes = excluded.repeat_minutes`,
+      )
+      .run(name, dueAt, repeatMinutes, now());
+  }
+
+  reminders(threadKey: string): ReminderRecord[] {
+    return (this.db.prepare("SELECT * FROM reminders WHERE kind = 'reminder' AND thread_key = ? ORDER BY due_at").all(threadKey) as Row[]).map(reminderOf);
+  }
+
+  cancelReminder(id: number, threadKey: string): boolean {
+    return this.db.prepare("DELETE FROM reminders WHERE id = ? AND kind = 'reminder' AND thread_key = ?").run(id, threadKey).changes === 1;
+  }
+
+  dueReminders(): ReminderRecord[] {
+    return (this.db.prepare("SELECT * FROM reminders WHERE due_at <= ? ORDER BY due_at").all(now()) as Row[]).map(reminderOf);
+  }
+
+  /**
+   * One transaction: the system row in the inbox (its source_id makes a second firing a no-op) and the reminder
+   * re-armed or deleted. A crash in between can neither lose nor double it.
+   */
+  fire(reminder: ReminderRecord, next: string | null, row: InboxRow | null): void {
+    tx(this.db, () => {
+      if (row && reminder.connector) {
+        const id = this.insertInbox(row, reminder.connector);
+        if (id !== null) this.event({ kind: "reminder_due", thread_key: row.thread_key, private: row.private, ref: id, payload: { reminder: reminder.id } });
+      }
+      if (next) this.db.prepare("UPDATE reminders SET due_at = ? WHERE id = ?").run(next, reminder.id);
+      else this.db.prepare("DELETE FROM reminders WHERE id = ?").run(reminder.id);
+    });
+  }
+
+  // --- acting elsewhere ----------------------------------------------------------------------------------------
+
+  /**
+   * A send, before the call: the outbox row (delivering) and the acted event in the conversation that asked, in one
+   * transaction. A re-run after a crash sees the acted event; the key stops the same send twice. null: already done.
+   */
+  startSend(s: { idem_key: string; thread_key: string; target_thread: string; connector: string; address: Address; post: Post; private: boolean; summary: string }): number | null {
+    return tx(this.db, () => {
+      const result = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, idem_key, created_at)
+           VALUES ('send', NULL, ?, ?, ?, ?, 'delivering', ?, ?)`,
+        )
+        .run(s.target_thread, s.connector, JSON.stringify(s.address), JSON.stringify(s.post), s.idem_key, now());
+      if (result.changes === 0) return null;
+      const id = Number(result.lastInsertRowid);
+      this.event({ kind: "acted", thread_key: s.thread_key, private: s.private, ref: id, payload: { tool: "send", summary: s.summary } });
+      return id;
+    });
+  }
+
+  /** A send Slack refused for sure: the key is freed, so the model may try again. */
+  freeKey(id: number) {
+    this.db.prepare("UPDATE outbox SET idem_key = NULL WHERE id = ?").run(id);
+  }
+
+  /** What the agent already did from this conversation (sends, reminders), for the prompt of a re-run. */
+  acted(threadKey: string): string[] {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const rows = this.db.prepare("SELECT payload FROM events WHERE thread_key = ? AND kind IN ('acted', 'reminder_set') AND at > ? ORDER BY id DESC LIMIT 10").all(threadKey, since) as Row[];
+    return rows.reverse().map((r) => {
+      const payload = JSON.parse(String(r.payload ?? "{}")) as { summary?: string; note?: string; due_at?: string };
+      return payload.summary ?? `reminder set for ${payload.due_at}: ${payload.note}`;
     });
   }
 
@@ -340,9 +462,11 @@ export class Store {
         `SELECT MIN(at) AS at FROM (
            SELECT next_attempt_at AS at FROM inbox WHERE status = 'pending' AND next_attempt_at > ?
            UNION ALL
-           SELECT next_attempt_at AS at FROM outbox WHERE status = 'pending' AND next_attempt_at > ?)`,
+           SELECT next_attempt_at AS at FROM outbox WHERE status = 'pending' AND next_attempt_at > ?
+           UNION ALL
+           SELECT due_at AS at FROM reminders WHERE due_at > ?)`,
       )
-      .get(at, at) as Row | undefined;
+      .get(at, at, at) as Row | undefined;
     return row?.at === null || row?.at === undefined ? undefined : String(row.at);
   }
 }

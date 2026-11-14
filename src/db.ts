@@ -3,8 +3,8 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 /**
- * Three tables. inbox and outbox carry the state (a status, updated); events keeps the history (append-only). Every
- * status change writes its event in the same transaction.
+ * inbox and outbox carry the state (a status, updated); events keeps the history (append-only). Every status change
+ * writes its event in the same transaction. reminders holds what is due later: the reminders the agent set, and jobs.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS inbox (
@@ -66,6 +66,22 @@ CREATE TABLE IF NOT EXISTS events (
   ref INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_thread ON events (thread_key, id);
+
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  job TEXT UNIQUE,
+  due_at TEXT NOT NULL,
+  repeat_minutes REAL,
+  note TEXT NOT NULL,
+  connector TEXT,
+  address TEXT,
+  thread_key TEXT,
+  created_by TEXT,
+  private INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reminders_due ON reminders (due_at);
 `;
 
 export function openDb(path: string): DatabaseSync {

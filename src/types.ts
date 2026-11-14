@@ -78,6 +78,10 @@ export interface Connector {
   onDisconnected?(callback: () => void): void;
   /** Raw events since this date (ISO), for the catch-up after a restart or an outage. */
   catchUp?(since: string): AsyncIterable<unknown>;
+  /** A person (name or id) → the address of a direct message with them, or null. */
+  resolve?(person: string): Promise<Address | null>;
+  /** The thread_key its rows carry for this address. Default: connector:conversation:thread. */
+  threadKeyOf?(address: Address): string;
 }
 
 /** How the agent engages in a place: only when mentioned, once mentioned in a thread, or triaged by a cheap model. */
@@ -86,7 +90,8 @@ export type Mode = "mention" | "mention-sticky" | "triage";
 /** Who may use a tool: every conversation, or the owner's private one. Decided by code, never by the model. */
 export type Rule = "all" | "owner";
 
-export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[] };
+/** Where the tool is called from: the rights, the conversation, the lot being answered. */
+export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[]; connector: string; address: Address };
 
 export type ToolDef = {
   name: string;

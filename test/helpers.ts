@@ -81,6 +81,12 @@ export class FakeConnector implements Connector {
     this.catchUps.push(since);
     for (const row of this.missed) if (row.sent_at >= since) yield row;
   }
+  threadKeyOf(address: Address) {
+    return `fake:${address.conversation}`;
+  }
+  async resolve(person: string): Promise<Address | null> {
+    return person === "nobody" ? null : { connector: "fake", conversation: `dm-${person}`, thread: "main" };
+  }
   async toInbox(raw: unknown) {
     return raw as InboxRow;
   }
@@ -133,7 +139,7 @@ export function makeCore(path: string, connector: Connector, brain: Brain, overr
 export async function waitFor(condition: () => boolean, ms = 3000) {
   const started = Date.now();
   while (!condition()) {
-    if (Date.now() - started > ms) throw new Error("condition jamais remplie");
+    if (Date.now() - started > ms) throw new Error("condition never met");
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
