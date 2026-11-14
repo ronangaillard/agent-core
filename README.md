@@ -102,6 +102,9 @@ checked twice, the Markdown memory, the `<elsewhere>` digest and the conversatio
 each line), and `read_conversation`, which reads the whole conversation of a `message:<id>` under the same rule.
 `search_messages` (the owner's alone unless `AGENT_PRIVACY=off`, when a connector can `search`: Slack with `SLACK_USER_TOKEN` and `search:read`)
 searches the whole workspace with the owner's rights; `read_conversation` reads a hit's conversation (`found:<n>`).
+Reactions: a `{ reaction }` post (an emoji on the message answered), from the reply's form or, in `triage` mode,
+from the gate when the agent stays silent; only to a connector that `reacts` (Slack). An outbox row of its own kind,
+written with the reply or the closing (never sent twice), never held nor in the owner's name, never an alert when lost.
 
 Step 3, done:
 - `send` to a named destination (with its rules), or for the owner to a person (`resolve`) or to the thread of a

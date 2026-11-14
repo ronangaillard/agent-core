@@ -132,6 +132,7 @@ export function slackConnector(options: {
 
   const connector: Connector = {
     id: "slack",
+    reacts: true,
 
     async start(sink) {
       const auth = await client.auth.test();
@@ -271,23 +272,32 @@ export function slackConnector(options: {
       schema: () =>
         z.object({
           messages: z.array(z.string()).describe("The messages to post, in order. Empty list: say nothing."),
+          reaction: z.string().optional().describe("An emoji name (e.g. thumbsup, eyes, white_check_mark) on the last message; often instead of a reply"),
         }),
       prompts: {
-        "slack-dm": "You are writing on Slack, in a direct message. Answer like a person on Slack: short, in the tone used, no headings or lists unless it is technical.",
-        "slack-thread": "You are writing on Slack, in a thread. Short, in the tone used. If you have nothing useful to add, say nothing (empty list).",
+        "slack-dm":
+          "You are writing on Slack, in a direct message. Answer like a person on Slack: short, in the tone used, no headings or lists unless it is technical. You may react to the last message with one emoji (reaction), not every time; a reaction alone (no messages) is enough for a thanks or an ok.",
+        "slack-thread":
+          "You are writing on Slack, in a thread. Short, in the tone used. If you have nothing useful to add, say nothing (empty list). A reaction (one emoji on the last message) often says enough instead of a reply.",
       },
       guide: (row) => ({ prompt: row.dm ? "slack-dm" : "slack-thread" }),
-      toPosts: (output) => ({
-        posts: (output as { messages: string[] }).messages.filter((text) => text.trim()).map((text): Post => ({ text })),
-        held: false,
-      }),
+      toPosts: (output) => {
+        const { messages, reaction } = output as { messages: string[]; reaction?: string };
+        const posts = messages.filter((text) => text.trim()).map((text): Post => ({ text }));
+        return { posts: reaction?.trim() ? [{ reaction: reaction.trim().replace(/^:|:$/g, "") }, ...posts] : posts, held: false };
+      },
     },
 
     async deliver(address, post): Promise<DeliverResult> {
-      if (!("text" in post)) return { ok: false, transient: false, error: "unsupported post" };
+      if ("reaction" in post && !address.ts) return { ok: false, transient: false, error: "no message to react to" };
       const asOwner = "as" in post && post.as === "owner";
       if (asOwner && !options.userToken) return { ok: false, transient: false, error: "no user token to post as the owner" };
       try {
+        if ("reaction" in post) {
+          await client.reactions.add({ channel: address.conversation, timestamp: address.ts!, name: post.reaction });
+          // Dated by the message reacted to: what the agent has seen, for the catch-up.
+          return { ok: true, ref: address.ts!, sent_at: isoOf(address.ts!) };
+        }
         const sent = await client.chat.postMessage({
           ...(asOwner ? { token: options.userToken } : {}),
           channel: address.conversation,
@@ -304,6 +314,8 @@ export function slackConnector(options: {
         if (e.code === "slack_webapi_request_error" && ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(e.original?.code ?? "")) {
           return { ok: false, transient: true, error: e.original?.code ?? "request" };
         }
+        // Already there: what was asked is done.
+        if ("reaction" in post && e.data?.error === "already_reacted") return { ok: true, ref: address.ts!, sent_at: isoOf(address.ts!) };
         // Slack said no: final.
         if (e.code === "slack_webapi_platform_error") return { ok: false, transient: false, error: e.data?.error ?? "platform_error" };
         // Anything else is ambiguous: it may have been posted. The core never sends it again.

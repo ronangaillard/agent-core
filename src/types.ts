@@ -42,7 +42,9 @@ export type InboxRow = {
 
 export type Post =
   /** as "owner": posted in the owner's name (a draft he validated). */
-  { text: string; as?: "owner" };
+  | { text: string; as?: "owner" }
+  /** An emoji (its name, e.g. "thumbsup") on the message of the address (its ts). Only to a connector that reacts. */
+  | { reaction: string };
 
 export type DeliverResult =
   | { ok: true; ref: string; sent_at: string; link?: string }
@@ -105,6 +107,8 @@ export interface Connector {
   catchUp?(since: string): AsyncIterable<unknown>;
   /** Search the whole place (not only where the agent is), with the owner's rights: the owner's tool only. */
   search?(query: string, limit: number): Promise<Found[]>;
+  /** It delivers { reaction } posts: the triage gate may then react where the agent stays silent. */
+  reacts?: boolean;
   /** A person (name or id) → the address of a direct message with them, or null. */
   resolve?(person: string): Promise<Address | null>;
   /** The thread_key its rows carry for this address. Default: connector:conversation:thread. */

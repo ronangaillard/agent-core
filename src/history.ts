@@ -19,7 +19,8 @@ const cut = (text: unknown, max: number) => {
 
 const line = (e: Exchange, max: number) => {
   const output = cut(e.payload.output, max);
-  const answer = e.payload.for_owner ? (output ? ` → you drafted for the owner: "${output}"` : "") : output ? ` → you: "${output}"` : " (you said nothing)";
+  const reacted = e.payload.reaction ? ` (you reacted :${String(e.payload.reaction)}:)` : "";
+  const answer = e.payload.for_owner ? (output ? ` → you drafted for the owner: "${output}"` : "") : output ? ` → you: "${output}"${reacted}` : reacted || " (you said nothing)";
   return `${localTime(e.at)}${e.ref ? ` message:${e.ref}` : ""} ${e.payload.author ?? e.author_id}: "${cut(e.payload.input, max)}"${answer}`;
 };
 

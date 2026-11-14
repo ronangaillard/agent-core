@@ -108,15 +108,19 @@ export class FakeConnector implements Connector {
   }
   /** Set: every reply waits for the owner, with this note. */
   holdWith: string | undefined;
+  reacts = false;
   form = {
-    schema: () => z.object({ messages: z.array(z.string()) }),
+    schema: () => z.object({ messages: z.array(z.string()), reaction: z.string().optional() }),
     prompts: { fake: "Answer." },
     guide: (_row: InboxRow, scope: Scope) => {
       this.scopes.push(scope);
       return { prompt: "fake" };
     },
     toPosts: (output: unknown) => ({
-      posts: (output as { messages: string[] }).messages.map((text): Post => ({ text })),
+      posts: [
+        ...((output as { reaction?: string }).reaction ? [{ reaction: (output as { reaction: string }).reaction }] : []),
+        ...(output as { messages: string[] }).messages.map((text): Post => ({ text })),
+      ],
       held: this.holdWith !== undefined,
       ...(this.holdWith ? { note: this.holdWith } : {}),
     }),
@@ -127,6 +131,7 @@ export class FakeConnector implements Connector {
   }
   post(address: Address, post: Post): DeliverResult {
     this.sent.push({ address, post });
+    if ("reaction" in post) return { ok: true, ref: address.ts ?? "", sent_at: new Date().toISOString() };
     const list = this.world.threads.get(address.conversation) ?? [];
     list.push({ author: "you", text: "text" in post ? post.text : "", at: new Date().toISOString() });
     this.world.threads.set(address.conversation, list);

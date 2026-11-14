@@ -11,6 +11,9 @@ import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type T
 import { TransientError, type Address, type Brain, type Connector, type DeliverResult, type InboxRow, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ToolContext, type ToolDef } from "./types.ts";
 
 const gateSchema = z.object({ speak: z.boolean().describe("true only if the agent has a real reason to speak") });
+const gateReactSchema = gateSchema.extend({
+  reaction: z.string().optional().describe("When not speaking, rarely: an emoji name (e.g. thumbsup) on the last message, like a colleague reading"),
+});
 
 export type CoreConfig = {
   /** The owner's id on the connectors (scope owner, mentions). */
@@ -180,6 +183,8 @@ export class Core {
   private readonly gates: Slots;
   private readonly tools: ToolDef[];
   readonly prompts: Prompts;
+  /** The gate's reactions on the messages it kept silent, until they are closed (in memory: a re-run asks again). */
+  private readonly gateReactions = new Map<number, string>();
   private timer: NodeJS.Timeout | undefined;
   /** The code tasks running or queued (one runs at a time), by task id. */
   private readonly runs = new Map<number, AbortController>();
@@ -769,13 +774,16 @@ export class Core {
   private async ask(gate: Brain, connector: Connector, row: InboxRecord): Promise<boolean> {
     const thread = await connector.read(row.address);
     const transcript = thread.messages.slice(-15).map((m) => `${m.author}: ${m.text}`).join("\n");
-    const output = gateSchema.parse(
+    // A connector that cannot react is never offered to.
+    const schema = connector.reacts ? gateReactSchema : gateSchema;
+    const output = schema.parse(
       await this.think(gate, {
-        system: `${this.prompts.text("gate", { label: thread.label })}\n\n${this.prompts.text("persona")}`,
+        system: [this.prompts.text("gate", { label: thread.label }), connector.reacts ? this.prompts.text("gate-react") : "", this.prompts.text("persona")].filter(Boolean).join("\n\n"),
         prompt: `<conversation>\n${transcript}\n</conversation>\n\nShould the agent answer the last message?`,
-        schema: gateSchema,
+        schema,
       }),
-    );
+    ) as { speak: boolean; reaction?: string };
+    if (!output.speak && output.reaction?.trim()) this.gateReactions.set(row.id, output.reaction.trim());
     return output.speak;
   }
 
@@ -801,7 +809,10 @@ export class Core {
         verdicts.set(row.id, verdict);
       }
       if (verdict === "ignored") {
-        this.store.close(row, "ignored");
+        const reaction = this.gateReactions.get(row.id);
+        this.gateReactions.delete(row.id);
+        this.store.close(row, "ignored", reaction ? { reaction } : undefined, reaction);
+        if (reaction) queueMicrotask(() => this.wake());
         continue;
       }
       if (verdict === "capped") {
@@ -985,15 +996,18 @@ export class Core {
     const formed = connector.form.toPosts(output);
     const said = (row: InboxRecord) => thread.messages.find((m) => m.at === row.sent_at);
     const author = system ? "event" : (said(last)?.author ?? last.author_id);
-    const posts = draft ? formed.posts.map((post): Post => ("text" in post ? { ...post, as: "owner" } : post)) : formed.posts;
     const held = draft || formed.held;
+    // A reaction leaves at once or not at all: never held, never in the owner's name, never to a connector that cannot.
+    const reaction = !held && connector.reacts ? formed.posts.find((post): post is { reaction: string } => "reaction" in post && Boolean(post.reaction.trim())) : undefined;
+    const spoken = formed.posts.filter((post): post is { text: string; as?: "owner" } => "text" in post);
+    const posts: Post[] = [...(reaction ? [{ reaction: reaction.reaction.trim() }] : []), ...(draft ? spoken.map((post): Post => ({ ...post, as: "owner" })) : spoken)];
     const note = draft ? `${author} mentioned you ${thread.label}: "${said(last)?.text ?? ""}"` : formed.note;
-    const texts = posts.map((post) => ("text" in post ? post.text : ""));
+    const texts = posts.flatMap((post) => ("text" in post ? [post.text] : []));
     this.store.recordReply(
       lot,
       posts,
       held,
-      { input: lot.map((row) => (row.author_kind === "system" ? (row.text ?? "") : (said(row)?.text ?? ""))).join("\n"), output: texts.join("\n"), author, place: thread.label, ...(draft ? { for_owner: true } : held ? { held: true } : {}) },
+      { input: lot.map((row) => (row.author_kind === "system" ? (row.text ?? "") : (said(row)?.text ?? ""))).join("\n"), output: texts.join("\n"), author, place: thread.label, ...(reaction ? { reaction: reaction.reaction.trim() } : {}), ...(draft ? { for_owner: true } : held ? { held: true } : {}) },
       {
         ...(draft ? { outcome: "to_owner" } : {}),
         ...(this.config.ownerAddress
@@ -1032,8 +1046,10 @@ export class Core {
 
   private async deliver(row: OutboxRecord) {
     const connector = this.connectors.get(row.connector);
+    // A reaction lost or refused is not worth an alert.
+    const alert = (text: string) => (row.kind === "reaction" ? undefined : text);
     if (!connector) {
-      this.store.dead(row, "no_connector", `A message was not sent (no connector ${row.connector}).`);
+      this.store.dead(row, "no_connector", alert(`A message was not sent (no connector ${row.connector}).`));
       return queueMicrotask(() => this.wake());
     }
     if (!this.store.markDelivering(row.id)) return;
@@ -1044,13 +1060,13 @@ export class Core {
       // Only a crash writes nothing: a SIGTERM still records what happened.
       if (this.killed) return;
       // Timeout or ambiguous error: it may have left. Never sent again.
-      this.lost(row, error instanceof Timeout ? "timeout" : "unknown");
+      this.lost(row, error instanceof Timeout ? "timeout" : "unknown", alert);
       return this.afterDelivery(row);
     }
     if (this.killed) return;
     if (result.ok) this.store.delivered(row, result.ref, result.sent_at);
     else if (result.transient && Date.now() - Date.parse(row.created_at) < this.config.maxRetryAgeMs) this.store.retryLater(row, later(this.backoff(row.attempts)), result.error);
-    else this.store.dead(row, result.error, `A message was not sent (${result.error}).`);
+    else this.store.dead(row, result.error, alert(`A message was not sent (${result.error}).`));
     this.afterDelivery(row);
   }
 
@@ -1060,8 +1076,8 @@ export class Core {
     this.wake();
   }
 
-  private lost(row: OutboxRecord, reason: string) {
-    this.store.dead(row, reason, `A message may or may not have been sent (${reason}): it is not sent again.`);
+  private lost(row: OutboxRecord, reason: string, alert: (text: string) => string | undefined = (text) => text) {
+    this.store.dead(row, reason, alert(`A message may or may not have been sent (${reason}): it is not sent again.`));
     queueMicrotask(() => this.wake());
   }
 

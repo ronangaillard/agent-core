@@ -333,3 +333,74 @@ test("debug view: the folders' Markdown files listed, edited, never anything out
   assert.equal(readFileSync(join(prompts, "gate.md"), "utf8"), "speak more\n");
   await debug.stop();
 });
+
+test("reactions: from the reply or the gate, through the outbox, never held, never an alert, never 'spoken'", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  connector.reacts = true;
+  let answer: { messages: string[]; reaction?: string } = { messages: [], reaction: "thumbsup" };
+  const brain: Brain = async () => answer;
+  let gateCalls = 0;
+  const gate: Brain = async () => {
+    gateCalls++;
+    return { speak: false, reaction: "eyes" };
+  };
+  const core = makeCore(freshDb(), connector, brain, { modes: { "fake:chan": "triage" } }, { gate });
+  await core.start();
+  const reactions = () => connector.sent.filter((s) => "reaction" in s.post);
+
+  // The reply: a reaction alone, on the message itself; not a reply.
+  const thanks = world.say("thanks!");
+  core.ingest(thanks, "fake");
+  await waitFor(() => reactions().length === 1);
+  assert.deepEqual(reactions()[0], { address: thanks.address, post: { reaction: "thumbsup" } });
+  assert.equal(connector.sent.length, 1);
+  assert.equal(core.store.allOutbox().find((o) => o.kind === "reaction")?.status, "delivered");
+
+  // The gate: silent, but reacts; the main model never runs.
+  const news = world.say("we shipped it", { thread: "chan", dm: false, author: "paul", ownerOnly: false });
+  const id = core.ingest(news, "fake")!;
+  await waitFor(() => reactions().length === 2);
+  assert.equal(gateCalls, 1);
+  assert.equal(core.store.inbox(id)?.status, "done");
+  assert.deepEqual(reactions()[1]!.post, { reaction: "eyes" });
+  // A reaction does not make the agent "spoken" there (mention-sticky).
+  assert.equal(core.store.agentSpokeIn("fake:chan"), false);
+
+  // Refused by the connector: dead, without an alert to the owner.
+  connector.deliverImpl = async (address, post) => ("reaction" in post ? { ok: false, transient: false, error: "invalid_name" } : connector.post(address, post));
+  core.ingest(world.say("ok"), "fake");
+  await waitFor(() => core.store.allOutbox().filter((o) => o.kind === "reaction").some((o) => o.status === "dead"));
+  await sleep(50);
+  assert.equal(core.store.allOutbox().filter((o) => o.kind === "alert").length, 0);
+
+  // Held (waits for the owner): the reaction is dropped, the reply waits.
+  connector.deliverImpl = undefined;
+  connector.holdWith = "check";
+  answer = { messages: ["sure"], reaction: "thumbsup" };
+  const before = core.store.allOutbox().filter((o) => o.kind === "reaction").length;
+  core.ingest(world.say("can you?", { thread: "t2" }), "fake");
+  await waitFor(() => core.store.allOutbox().some((o) => o.status === "held"));
+  assert.equal(core.store.allOutbox().filter((o) => o.kind === "reaction").length, before);
+  core.kill();
+});
+
+test("reactions: a connector that cannot react is never offered one, and never sent one", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const schemas: unknown[] = [];
+  const gate: Brain = async ({ schema }) => {
+    schemas.push(schema);
+    return { speak: false, reaction: "eyes" };
+  };
+  const core = makeCore(freshDb(), connector, async () => ({ messages: [], reaction: "thumbsup" }), { modes: { "fake:chan": "triage" } }, { gate });
+  await core.start();
+  const id = core.ingest(world.say("hello"), "fake")!;
+  const quiet = core.ingest(world.say("fyi", { thread: "chan", dm: false, author: "paul", ownerOnly: false }), "fake")!;
+  await waitFor(() => core.store.inbox(id)?.status === "done" && core.store.inbox(quiet)?.status === "done");
+  await sleep(30);
+  assert.equal(connector.sent.length, 0);
+  assert.equal(core.store.allOutbox().length, 0);
+  assert.doesNotMatch(JSON.stringify(schemas), /reaction/);
+  core.kill();
+});

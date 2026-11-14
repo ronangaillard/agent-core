@@ -12,7 +12,7 @@ export type InboxRecord = InboxRow & {
   received_at: string;
 };
 
-export type OutboxKind = "reply" | "send" | "report" | "alert";
+export type OutboxKind = "reply" | "send" | "report" | "alert" | "reaction";
 
 export type OutboxRecord = {
   id: number;
@@ -456,9 +456,15 @@ export class Store {
       .run(counted ? 1 : 0, at, ...ids);
   }
 
-  close(row: InboxRecord, outcome: string, payload?: unknown) {
+  /** reaction: an emoji on this message, written with the closing (a re-run finds it done, never reacts twice). */
+  close(row: InboxRecord, outcome: string, payload?: unknown, reaction?: string) {
     tx(this.db, () => {
       this.db.prepare("UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id = ?").run(outcome, now(), row.id);
+      if (reaction) {
+        this.db
+          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('reaction', ?, ?, ?, ?, ?, 'pending', ?)")
+          .run(row.id, row.thread_key, row.connector, JSON.stringify(row.address), JSON.stringify({ reaction }), now());
+      }
       this.event({ kind: outcome, thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id, payload });
     });
   }
@@ -479,12 +485,17 @@ export class Store {
     lot: InboxRecord[],
     posts: Post[],
     held: boolean,
-    readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean; held?: boolean },
+    readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean; held?: boolean; reaction?: string },
     options: { outcome?: string; notice?: { address: Address; threadKey: string; text: string } } = {},
   ) {
     const last = lot[lot.length - 1]!;
-    const replied = posts.length > 0;
+    // A reaction is not a reply: it never replaces a held reply, never makes the agent "spoken" in the thread.
+    const replied = posts.some((post) => "text" in post);
     tx(this.db, () => {
+      const react = this.db.prepare(
+        "INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('reaction', ?, ?, ?, ?, ?, 'pending', ?)",
+      );
+      for (const post of posts) if ("reaction" in post) react.run(lot[0]!.id, last.thread_key, last.connector, JSON.stringify(last.address), JSON.stringify(post), now());
       if (replied) {
         for (const old of this.db.prepare("SELECT id FROM outbox WHERE thread_key = ? AND kind = 'reply' AND status = 'held'").all(last.thread_key) as Row[]) {
           this.db.prepare("UPDATE outbox SET status = 'dead', reason = 'replaced' WHERE id = ?").run(Number(old.id));
@@ -493,7 +504,7 @@ export class Store {
         const insert = this.db.prepare(
           "INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('reply', ?, ?, ?, ?, ?, ?, ?)",
         );
-        for (const post of posts) insert.run(lot[0]!.id, last.thread_key, last.connector, JSON.stringify(last.address), JSON.stringify(post), held ? "held" : "pending", now());
+        for (const post of posts) if ("text" in post) insert.run(lot[0]!.id, last.thread_key, last.connector, JSON.stringify(last.address), JSON.stringify(post), held ? "held" : "pending", now());
       }
       const ids = lot.map((r) => r.id);
       this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(options.outcome ?? (replied ? "replied" : "silent"), now(), ...ids);
