@@ -66,6 +66,7 @@ GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_D
 The webhook takes the `deployment_status` event; only final states count, once per deployment.
 
 Code tasks (off unless both are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default);
+`GITHUB_TOKEN_<OWNER>` for another owner's repositories (`GITHUB_TOKEN_ACME_LABS` for `acme-labs/…`);
 `AGENT_WORKSPACE` (default `data/workspace`). The session's terminal runs in Claude Code's sandbox (on Linux it needs
 `bubblewrap`): it writes only in the task's copy and reaches only package registries. Or, with `STEVE_APERCU_URL` and
 `STEVE_APERCU_TOKEN`, Claude Code's terminal is off and every command runs in a container per copy of

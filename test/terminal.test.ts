@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { apercuTerminal } from "../src/runners/apercu.ts";
-import { gitIdentity, terminalTool, type Terminal } from "../src/runners/claude-code.ts";
+import { gitIdentity, terminalTool, tokenFor, tokensFromEnv, type Terminal } from "../src/runners/claude-code.ts";
 
 type Call = { method: string; path: string; auth?: string; body: Record<string, unknown> };
 
@@ -128,4 +128,14 @@ test("the terminal tool exports the git identity before each command, quoted for
   assert.ok(script.endsWith("\ngit commit -m x"));
   const out = execFileSync("bash", ["-c", `${script.replace("git commit -m x", 'printf "%s|%s" "$GIT_AUTHOR_NAME" "$GIT_COMMITTER_EMAIL"')}`], { encoding: "utf8" });
   assert.equal(out, "O'Brien|o-brien@users.noreply.github.com");
+});
+
+test("each repository gets its owner's token, else the default one", () => {
+  const byOwner = tokensFromEnv({ GITHUB_TOKEN: "default", GITHUB_TOKEN_RONAN: "perso", GITHUB_TOKEN_ACME_LABS: "acme", GITHUB_TOKEN_EMPTY: "", OTHER: "x" });
+  assert.deepEqual(byOwner, { ronan: "perso", "acme-labs": "acme" });
+  assert.equal(tokenFor("ronan/agent-core", "default", byOwner), "perso");
+  assert.equal(tokenFor("Ronan/agent-core", "default", byOwner), "perso", "GitHub owners ignore case");
+  assert.equal(tokenFor("acme-labs/api", "default", byOwner), "acme");
+  assert.equal(tokenFor("maestro-tech/still-maestro", "default", byOwner), "default");
+  assert.equal(tokenFor("ronanx/repo", "default", byOwner), "default", "a prefix is not the owner");
 });

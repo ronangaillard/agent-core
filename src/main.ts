@@ -10,7 +10,7 @@ import { Memory } from "./memory.ts";
 import { ownerCommands } from "./owner.ts";
 import { githubSource } from "./sources/github.ts";
 import { apercuTerminal } from "./runners/apercu.ts";
-import { claudeCodeRunner } from "./runners/claude-code.ts";
+import { claudeCodeRunner, tokensFromEnv } from "./runners/claude-code.ts";
 import { Store } from "./store.ts";
 import type { Mode, Rule } from "./types.ts";
 
@@ -53,7 +53,7 @@ const email =
       })
     : undefined;
 
-/** Code tasks: off unless a GitHub token and the repositories are set. */
+/** Code tasks: off unless a GitHub token and the repositories are set. GITHUB_TOKEN_<OWNER>: another owner's token. */
 const repos = (process.env.AGENT_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean);
 /** Their terminal in steve-apercu's workshop (a container per copy) instead of Claude Code's sandbox, when both are set. */
 const terminal =
@@ -63,6 +63,7 @@ const runner =
     ? claudeCodeRunner({
         workspace: process.env.AGENT_WORKSPACE ?? "data/workspace",
         githubToken: process.env.GITHUB_TOKEN,
+        githubTokens: tokensFromEnv(process.env),
         persona,
         name: process.env.AGENT_NAME ?? "Agent",
         ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}),

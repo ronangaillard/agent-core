@@ -27,6 +27,8 @@ export type ClaudeCodeOptions = {
   denyRead?: string[];
   /** Used by this process only (clone, push, PR): never in the copy, never in the session's environment. */
   githubToken: string;
+  /** Tokens by repository owner (case-insensitive), e.g. one per organisation; githubToken for the others. */
+  githubTokens?: Record<string, string>;
   /** The agent, as the session's system prompt starts. */
   persona: string;
   name: string;
@@ -121,6 +123,26 @@ export async function pushBranch(dir: string, vault: string, remote: string, bra
   await git(["push", "--quiet", remote, `refs/heads/${branch}:refs/heads/${branch}`], { cwd: vault, token });
 }
 
+/** The token for a repository ("owner/name"): its owner's, else the default. */
+export function tokenFor(repo: string, fallback: string, byOwner: Record<string, string> = {}): string {
+  const owner = repo.split("/")[0]!.toLowerCase();
+  const match = Object.entries(byOwner).find(([key]) => key.toLowerCase() === owner);
+  return match ? match[1] : fallback;
+}
+
+/**
+ * Tokens by owner from the environment: GITHUB_TOKEN_<OWNER>, the owner in capitals with "-" as "_" (GitHub logins
+ * are letters, digits and dashes). GITHUB_TOKEN_ACME_LABS → acme-labs.
+ */
+export function tokensFromEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const tokens: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const owner = /^GITHUB_TOKEN_([A-Z0-9_]+)$/.exec(key)?.[1];
+    if (owner && value) tokens[owner.toLowerCase().replaceAll("_", "-")] = value;
+  }
+  return tokens;
+}
+
 /** The commits' author, in the terminal's environment. */
 export function gitIdentity(name: string): Record<string, string> {
   const email = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@users.noreply.github.com`;
@@ -201,10 +223,10 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
   // The copies are written here and in the remote container (another uid, allowed by an ACL): files group-writable.
   if (options.terminal) process.umask(0o002);
 
-  async function github<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function github<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`https://api.github.com${path}`, {
       ...init,
-      headers: { authorization: `Bearer ${options.githubToken}`, accept: "application/vnd.github+json", "user-agent": "agent-core", ...(init.headers ?? {}) },
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "agent-core", ...(init.headers ?? {}) },
     });
     const body = await response.text();
     if (!response.ok) throw new Error(`GitHub ${path}: ${response.status} ${body.slice(0, 300)}`);
@@ -216,7 +238,8 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     const dir = join(workspace, `task-${task.id}`);
     const vault = join(vaults, `task-${task.id}.git`);
     const remote = `${base}/${task.repo}.git`;
-    const prepared = await prepareCopy(dir, vault, remote, task.branch, options.githubToken);
+    const token = tokenFor(task.repo, options.githubToken, options.githubTokens);
+    const prepared = await prepareCopy(dir, vault, remote, task.branch, token);
     const { log } = prepared;
     let upstream = prepared.upstream;
     // The remote container sees the copy only: the bundle goes into it (its .git, never committed).
@@ -246,13 +269,13 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
           return { content: [{ type: "text" as const, text: "Noted." }] };
         }),
         tool("push_branch", `Push the copy's commits to the task's branch (${task.branch}). Commit first.`, {}, async () => {
-          await pushBranch(dir, vault, remote, task.branch, options.githubToken);
+          await pushBranch(dir, vault, remote, task.branch, token);
           return { content: [{ type: "text" as const, text: `Pushed to ${task.branch}.` }] };
         }),
         tool("open_pr", "Open the task's pull request (one per task; it already exists after the first time). Push first.", { title: z.string(), body: z.string() }, async ({ title, body }) => {
           if (pr) return { content: [{ type: "text" as const, text: `PR #${pr} already open: pushing updates it.` }] };
-          const repo = await github<{ default_branch: string }>(`/repos/${task.repo}`);
-          const opened = await github<{ number: number; html_url: string }>(`/repos/${task.repo}/pulls`, {
+          const repo = await github<{ default_branch: string }>(token, `/repos/${task.repo}`);
+          const opened = await github<{ number: number; html_url: string }>(token, `/repos/${task.repo}/pulls`, {
             method: "POST",
             body: JSON.stringify({ title, body, head: task.branch, base: repo.default_branch }),
           });
