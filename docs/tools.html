@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Steve — tools and scopes</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457C5}a:hover{color:#1A3F91}
+</style>
+</helmet>
+<div style="position: relative; width: 2784px; height: 1504px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
+
+<div style="position: absolute; left: 64px; top: 1000px; width: 2656px; height: 440px; box-sizing: border-box; background: #EEF2FA; border: 1px solid #C9D5EE; border-radius: 18px"></div>
+
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 304px; top: 476px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+<svg width="99" height="8" viewBox="0 0 99 8" preserveAspectRatio="none" style="position: absolute; left: 780px; top: 476px; width: 99px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 95 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+<svg width="99" height="8" viewBox="0 0 99 8" preserveAspectRatio="none" style="position: absolute; left: 1400px; top: 476px; width: 99px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 95 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+<svg width="50" height="8" viewBox="0 0 50 8" preserveAspectRatio="none" style="position: absolute; left: 2020px; top: 476px; width: 50px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 50 4"></path></svg>
+<svg width="8" height="470" viewBox="0 0 8 470" preserveAspectRatio="none" style="position: absolute; left: 2066px; top: 300px; width: 8px; height: 470px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 4 0 L 4 470"></path></svg>
+<svg width="49" height="8" viewBox="0 0 49 8" preserveAspectRatio="none" style="position: absolute; left: 2070px; top: 296px; width: 49px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 45 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+<svg width="49" height="8" viewBox="0 0 49 8" preserveAspectRatio="none" style="position: absolute; left: 2070px; top: 556px; width: 49px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 45 4" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+<svg width="49" height="8" viewBox="0 0 49 8" preserveAspectRatio="none" style="position: absolute; left: 2070px; top: 766px; width: 49px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 45 4" marker-end="url(#dc-arrow-head-filled-6)"></path></svg>
+<svg width="8" height="79" viewBox="0 0 8 79" preserveAspectRatio="none" style="position: absolute; left: 1756px; top: 680px; width: 8px; height: 79px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><defs><marker id="dc-arrow-head-filled-7" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 75" marker-end="url(#dc-arrow-head-filled-7)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 672px; top: 1140px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #2457C5; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-8" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#2457C5" stroke="none" style="stroke: none; fill: #2457C5; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-8)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 672px; top: 1260px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #2457C5; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-9" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#2457C5" stroke="none" style="stroke: none; fill: #2457C5; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-9)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 672px; top: 1372px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #A8A8A0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-10" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#A8A8A0" stroke="none" style="stroke: none; fill: #A8A8A0; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-10)"></path></svg>
+
+<div style="position: absolute; left: 64px; top: 40px; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Tools and scopes: who may do what</div>
+<div style="position: absolute; left: 64px; top: 80px; width: 2400px; color: #5E5E58">The model chooses which tool to call and with which arguments. The code decides which ones exist for it, what they know about the conversation (the scope), and rechecks before executing. The tools are an in-process MCP server, built for each respond().</div>
+
+<div style="position: absolute; left: 64px; top: 400px; width: 240px; height: 160px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">Message #41</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">author_id: U_RONAN (owner)
+place: #tech, public
+address: {slack, …}</span></span></div>
+
+<div style="position: absolute; left: 400px; top: 240px; width: 380px; height: 480px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 12px"><span><b style="font-size: 15px">scopeOf(message)</b> <span style="color: #5E5E58">· code, not the model</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">owner = author_id == owner
+        AND owner_only (their DM with
+        the bot; never by e-mail)
+        AND author_kind == human
+batch: narrowest scope;
+  system only; requester = author
+  of the last row; a reserved
+  action requires that all are
+  allowed
+return Scope {
+  owner,     // Ronan in #tech → false
+  requester: author_id, // Slack id
+  private,
+}
+ToolContext = { scope, threadKey,
+  lotIds, connector,
+  <span style="color: #1A3F91">address, sent }</span>
+→ drives the tools, the memory
+  and the prompt's situation</span></span></div>
+
+<div style="position: absolute; left: 880px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">bind(tools, context)</b> <span style="color: #5E5E58">· rules on each ToolDef</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">tool                     rules
+memory_list · memory_read  all
+memory_write             owner
+search_conversations     all
+send                     all (+ target's
+                         rules)
+set · list · cancel_reminder  all
+start_code_task          all (if runner)
+
+keeps tools that allows(rules, scope)
+accepts, rechecks at execution;
+effect: an owner draft has no
+tool with an effect</span></span></div>
+
+<div style="position: absolute; left: 1500px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">query()</b> <span style="color: #5E5E58">· Agent SDK, in respond()</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">query({ system, prompt,
+  mcpServers, allowedTools,
+  tools: [] (no native tool),
+  permissionMode: "dontAsk":
+    the rest denied,
+  abortController (10 min),
+  maxTurns: 20, outputFormat })
+
+loop:
+  model → tool_use(name, args)
+  SDK   → runs the tool
+  model ← tool_result
+  … until the final answer
+    (enforced JSON)</span></span></div>
+
+<div style="position: absolute; left: 1500px; top: 760px; width: 520px; height: 180px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px dashed #A8A8A0; border-radius: 10px"><span><b style="font-size: 15px">Second lock</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">bind(): run() rechecks allows(rules,
+        scope) before executing
+send: destination's rules, and the
+      privacy rule for message:&lt;id&gt;
+no hooks: no prod tool here</span></span></div>
+
+<div style="position: absolute; left: 2120px; top: 160px; width: 600px; height: 280px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b style="font-size: 15px">MCP in-process</b> <span style="color: #5E5E58">· all tools</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">createSdkMcpServer({ tools: tools(scope) })
+tool("set_reminder",
+  "when to use it",            // description
+  { note: z.string(), … },     // zod schema
+  async (args) => { … })       // the code
+</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">built for this scope: the tool knows the
+conversation without the model providing it
+send: key (thread, batch, place, n-th)
+written with the effect, same transaction;
+already there → "Already sent"</span></span></div>
+
+<div style="position: absolute; left: 2120px; top: 470px; width: 600px; height: 180px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">External MCPs · not yet</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">Notion, prod_anon: not kept from agent-core
+an external MCP does not see the scope:
+only to isolate secrets or a
+third-party service, the day one is needed</span></span></div>
+
+<div style="position: absolute; left: 2120px; top: 700px; width: 600px; height: 140px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">No native file tools</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">memory_list · memory_read · memory_write
+confined in code (resolve, symlinks followed);
+shelves read-only: code/ = its own code</span></span></div>
+
+<div style="position: absolute; left: 88px; top: 1020px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #2457C5">DONE: TOOLS SPEAK ADDRESS, NOT SLACK</div>
+
+<div style="position: absolute; left: 112px; top: 1100px; width: 560px; height: 88px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b>programmer_rappel</b> (old Steve)<br><span style="color: #5E5E58">stores channel + threadTs: Slack hardcoded</span></span></div>
+<div style="position: absolute; left: 768px; top: 1100px; width: 760px; height: 88px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b>set_reminder</b> (agent-core)<br>stores the context's address in reminders: a reminder set by e-mail works with no extra code</span></div>
+
+<div style="position: absolute; left: 112px; top: 1212px; width: 560px; height: 104px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b>slack_poster · slack_ecrire_en_prive · slack_modifier_message</b> (old Steve)<br><span style="color: #5E5E58">to "speak elsewhere", one tool per Slack gesture</span></span></div>
+<div style="position: absolute; left: 768px; top: 1204px; width: 760px; height: 120px; box-sizing: border-box; padding: 10px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace">send(to, text)</b> · delivered right away (outbox send + acted), returns the permalink or the error<br>to: named destination; for the owner, a person or message:&lt;id&gt; <b>visible from this scope</b><br><span style="color: #5E5E58">key (n-th send to this place in the batch) and acted event written with delivering before the call: a re-run sees them; refused if the target is the current thread; timeout → "status unknown"</span></span></div>
+
+<div style="position: absolute; left: 112px; top: 1340px; width: 560px; height: 72px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b>slack_lire_fil · slack_lire_canal · slack_regarder_image</b> (old Steve)</span></div>
+<div style="position: absolute; left: 768px; top: 1340px; width: 760px; height: 72px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span>not carried over: the thread is read by read() before respond(); writing goes through the Address</span></div>
+
+<div style="position: absolute; left: 1608px; top: 1100px; width: 1088px; height: 312px; box-sizing: border-box; padding: 20px 24px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">What we don't do</b><br><br>• <b>No plugin framework</b>: a list of ToolDef (name, input zod, rules, effect, run) passed to the core, bound by bind().<br>• <b>No external MCP per domain</b>: a separate process does not see the scope, it would have to be passed via env or hooks, with processes to manage.<br>• <b>No tool per need</b>: generic capabilities (memory and shelves, send, reminders, tasks), never a business-specific tool.<br><br><span style="color: #5E5E58">Done in agent-core: the context carries the address, Slack writing goes through send(to, text), and tools with effects write an acted event.</span></span></div>
+
+<div style="position: absolute; left: 308px; top: 452px; width: 88px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">message</div>
+<div style="position: absolute; left: 784px; top: 452px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">Scope</div>
+<div style="position: absolute; left: 1404px; top: 436px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">mcpServers +<br>allowedTools</div>
+<div style="position: absolute; left: 1772px; top: 704px; width: 200px; text-align: left; font-size: 12px; line-height: 15px; color: #5E5E58">around each tool_use</div>
+<div style="position: absolute; left: 2024px; top: 436px; width: 40px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">tools</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2784,"height":1504}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

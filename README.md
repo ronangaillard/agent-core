@@ -3,6 +3,8 @@
 A generic core for a conversational agent. Nothing in it is specific to one agent: the persona, the owner and the
 tokens come from the environment.
 
+Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaillard.github.io/agent-core/).
+
 ## Principles
 
 - **Durable state in SQLite**: `inbox` and `outbox` carry the state (a status), `events` keeps the history,

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-core architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light;--ink:#1F1F1C;--muted:#5E5E58;--line:#D9D9D4;--accent:#2457C5;--ground:#F7F7F5}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:48px 16px 64px}
+h1{margin:0 0 8px;font-size:32px;line-height:1.2;letter-spacing:-0.01em}
+p{margin:0 0 16px;color:var(--muted)}
+ol{list-style:none;margin:32px 0 0;padding:0;display:grid;gap:12px}
+a.board{display:block;padding:16px 20px;background:#fff;border:1px solid var(--line);border-radius:12px;color:var(--ink);text-decoration:none}
+a.board:hover,a.board:focus-visible{border-color:var(--accent);outline:none}
+a.board b{display:block;font-size:17px;margin-bottom:2px}
+a.board span{color:var(--muted);font-size:14px}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>agent-core architecture</h1>
+<p>Five hand-drawn boards of how <a href="https://github.com/ronangaillard/agent-core">agent-core</a> works: the durable core, one message end to end, the tools and their rights, code tasks, and the connector contract. They are large fixed-size diagrams: scroll and zoom out.</p>
+<ol>
+<li><a class="board" href="main.html"><b>Architecture</b><span>Inbound, the core, outbound; SQLite tables, the scheduler, guardrails.</span></a></li>
+<li><a class="board" href="flux.html"><b>One Slack message, end to end</b><span>From the websocket to the reply in the thread, step by step, with the tables' columns.</span></a></li>
+<li><a class="board" href="tools.html"><b>Tools and scopes</b><span>Who may use what: rights decided by code, checked twice.</span></a></li>
+<li><a class="board" href="tasks.html"><b>Code tasks</b><span>A task, a copy, a branch, a PR; continued later from any conversation.</span></a></li>
+<li><a class="board" href="connector.html"><b>The Connector contract</b><span>What a connector gives the core, and what each side never does.</span></a></li>
+</ol>
+</main>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Steve — Connector contract</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457C5}a:hover{color:#1A3F91}
+</style>
+</helmet>
+<div style="width: 2560px; height: 1440px; box-sizing: border-box; padding: 40px 64px; display: flex; flex-direction: column; gap: 28px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">The Connector contract</h1>
+<p style="margin: 0; color: #5E5E58">Two connectors in agent-core: Slack (live) and email (written, not yet enabled on the NAS). What they provide to the core: the core never reads an Address or a raw payload and never calls an external API. GitHub and the scheduler are not connectors but sources (below).</p>
+</div>
+
+<div style="display: flex; gap: 28px; align-items: stretch">
+
+<div style="flex: 0 0 1340px; box-sizing: border-box; padding: 22px 26px; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 14px">
+<div style="font-size: 15px; font-weight: 700; margin-bottom: 10px">src/types.ts (agent-core)</div>
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 19px; white-space: pre; color: #3A3A36"><span style="color: #2457C5">type</span> Address = {
+  connector: string;     <span style="color: #6B6B65">// slack, email: opaque to the core</span>
+  conversation: string;  <span style="color: #6B6B65">// channel, email address</span>
+  thread: string;        <span style="color: #6B6B65">// Slack DM: "main"; email: first Message-ID + sender</span>
+  ts?: string;           <span style="color: #6B6B65">// the triggering message; threadOf() strips it: the core's only read</span>
+};
+
+<span style="color: #2457C5">type</span> InboxRow = {
+  source_id: string;     <span style="color: #6B6B65">// UNIQUE: slack:C:ts · email:Message-ID · reminder:id:due_at · github:deploy:id</span>
+  address: Address;  thread_key: string;  mode_key: string;  <span style="color: #6B6B65">// mode_key: the channel, for its mode</span>
+  author_id: string;  author_kind: "human" | "bot" | "system";
+  owner_only: boolean;  private: boolean;  dm: boolean;     <span style="color: #6B6B65">// owner_only: bot's DM with the owner, never an email</span>
+  mentions_agent: boolean;  mentions_owner: boolean;
+  sent_at: string;       <span style="color: #6B6B65">// ISO: the core compares dates, never ts or Message-IDs</span>
+  payload: unknown;  text?: string;  caught_up?: boolean;  <span style="color: #6B6B65">// text: owner commands, system events</span>
+};
+
+<span style="color: #2457C5">type</span> Post = { text: string; as?: "owner" };  <span style="color: #6B6B65">// as owner: approved draft, posted with their token</span>
+
+<span style="color: #2457C5">type</span> DeliverResult =
+  | { ok: true; ref: string; sent_at: string; link?: string }  <span style="color: #6B6B65">// ref: ts or Resend id</span>
+  | { ok: false; transient: boolean; error: string };  <span style="color: #6B6B65">// transient: surely not sent; ambiguous → throw</span>
+
+<span style="color: #2457C5">interface</span> Connector {
+  id: string;
+  start(sink: (raw: unknown) =&gt; void): Promise&lt;void&gt;;  stop?(): Promise&lt;void&gt;;
+  toInbox(raw: unknown): Promise&lt;InboxRow | null&gt;; <span style="color: #6B6B65">// null: not for it (non-member, refused)</span>
+  catchUp?(since: string): AsyncIterable&lt;unknown&gt;;  <span style="color: #6B6B65">// from the stored cursor; error → the pass fails</span>
+  read(address: Address): Promise&lt;Thread&gt;;   <span style="color: #6B6B65">// up to this message incl.; readable + place label</span>
+  resolve?(person: string): Promise&lt;Address | null&gt;;  <span style="color: #6B6B65">// a person → their DM; named destinations = config</span>
+  threadKeyOf?(address: Address): string;    <span style="color: #6B6B65">// the thread_key of its rows for this address</span>
+  form: { schema(row: InboxRow, scope: Scope): ZodType;
+          guide(row: InboxRow, scope: Scope): string;
+          toPosts(output: unknown): { posts: Post[]; held: boolean; note?: string } };
+  deliver(address: Address, post: Post): Promise&lt;DeliverResult&gt;;  <span style="color: #6B6B65">// the core owns retries</span>
+  typing?(address: Address): Promise&lt;void&gt;;
+  onConnected?(cb: () =&gt; void): void;  onDisconnected?(cb: () =&gt; void): void;
+}</div>
+</div>
+
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+
+<div style="box-sizing: border-box; padding: 22px 26px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px">
+<div style="font-size: 15px; font-weight: 700; margin-bottom: 10px">The two connectors</div>
+<table style="border-collapse: collapse; width: 100%; font-size: 13px; line-height: 18px">
+<thead><tr style="text-align: left; color: #5E5E58"><th style="padding: 6px 8px; border-bottom: 1px solid #D9D9D4; font-weight: 600">connector</th><th style="padding: 6px 8px; border-bottom: 1px solid #D9D9D4; font-weight: 600">thread</th><th style="padding: 6px 8px; border-bottom: 1px solid #D9D9D4; font-weight: 600">comes in via</th><th style="padding: 6px 8px; border-bottom: 1px solid #D9D9D4; font-weight: 600">goes out via</th></tr></thead>
+<tbody>
+<tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">Slack</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">DM: "main"; otherwise thread_ts ?? ts</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">Socket Mode, catch-up (threads re-read 7 days back)</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">chat.postMessage, bot token (approved draft: owner's token)</td></tr>
+<tr><td style="padding: 6px 8px; font-weight: 600">Email</td><td style="padding: 6px 8px">first Message-ID of References + sender</td><td style="padding: 6px 8px">Resend webhook (Svix-verified); allowed domains and DMARC; never the owner's scope</td><td style="padding: 6px 8px">Resend, in the thread; unsure: outbox held</td></tr>
+</tbody>
+</table>
+</div>
+
+<div style="box-sizing: border-box; padding: 22px 26px; background: #FFFFFF; border: 2px solid #B85C1E; border-radius: 14px">
+<div style="font-size: 15px; font-weight: 700; margin-bottom: 8px">The sources (not connectors)</div>
+<div>They build an InboxRow <b>author_kind system</b> whose address is a real connector's: the per-thread lock, read() and delivery work with no special case. Only the source_id carries their origin.</div>
+<table style="border-collapse: collapse; width: 100%; font-size: 13px; line-height: 18px; margin-top: 10px">
+<tbody>
+<tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">scheduler</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">due reminder → address = reminders.address; source_id reminder:id:due_at</td></tr>
+<tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">GitHub</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">final deployment_status → a configured address; source_id github:deploy:&lt;deployment id&gt;, the same via the signed webhook and the startup pass</td></tr>
+<tr><td style="padding: 6px 8px; font-weight: 600">tasks</td><td style="padding: 6px 8px">do not go through the inbox: their reports are outbox reports to tasks.address</td></tr>
+</tbody>
+</table>
+</div>
+
+<div style="display: flex; gap: 24px">
+<div style="flex: 1 1 0; min-width: 0; box-sizing: border-box; padding: 20px 24px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px"><div style="font-size: 15px; font-weight: 700; margin-bottom: 8px">The core never</div><div>• reads a raw payload; of an Address, it only strips the ts (threadOf)<br>• calls Slack, Resend or GitHub<br>• knows the owner's commands: it is given a list (owner.ts)<br>• guesses a thread: it takes thread_key</div></div>
+<div style="flex: 1 1 0; min-width: 0; box-sizing: border-box; padding: 20px 24px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px"><div style="font-size: 15px; font-weight: 700; margin-bottom: 8px">The connector never</div><div>• decides permissions (scopeOf, in the core)<br>• writes to inbox or outbox itself<br>• replies on its own<br>• decides a retry: it says transient or not, the core decides</div></div>
+</div>
+
+<div style="box-sizing: border-box; padding: 20px 24px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px"><div style="font-size: 15px; font-weight: 700; margin-bottom: 8px">The owner's path</div><div>Their DMs with colleagues are never read (toInbox returns null: the bot is not a member). Their commands (held, send &lt;n&gt;, send &lt;n&gt;: text, drop &lt;n&gt;, help) are recognized by code on row.text in their DM with the bot, before anything else (outcome intercepted, no model); never by email. When a human mentions them where Steve would not speak, Steve writes the reply in their place: a held draft (outcome to_owner), with no side-effect tool, announced in their DM; send &lt;n&gt; posts it with their token. Polls have no code: send to people.</div></div>
+
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2560,"height":1440}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
