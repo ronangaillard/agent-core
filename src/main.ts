@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeBrain } from "./claude.ts";
+import { mcpTools, type McpServerConfig } from "./mcp.ts";
 import { emailConnector } from "./connectors/email.ts";
 import { debugServer } from "./debug.ts";
 import { slackConnector } from "./connectors/slack.ts";
@@ -87,6 +88,12 @@ const shelves = JSON.parse(process.env.AGENT_SHELVES ?? "{}") as Record<string, 
 const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves, process.env.AGENT_MEMORY_WRITERS === "all" ? "all" : "owner");
 
 /**
+ * AGENT_MCP_SERVERS: remote MCP servers whose tools the agent gets, all of them, with their token's rights, e.g.
+ * {"notion":{"url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer ${NOTION_MCP_TOKEN}"}}}.
+ */
+const mcp = await mcpTools(JSON.parse(process.env.AGENT_MCP_SERVERS ?? "{}") as Record<string, McpServerConfig>);
+
+/**
  * The web view: the tables (read-only), and the prompts and the memory (read and edited). Off unless both are set:
  * it shows private conversations and changes what the agent is told.
  */
@@ -107,7 +114,7 @@ const core = new Core({
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
   prompts,
-  tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy })],
+  tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy }), ...mcp],
   config: {
     ...defaultConfig,
     ownerId,

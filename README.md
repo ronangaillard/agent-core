@@ -31,6 +31,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |
 | `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
+| `src/mcp.ts` | Remote MCP servers (`AGENT_MCP_SERVERS`, e.g. Notion): all their tools as the agent's own, bound by rules and traced; a tool not marked read-only is an effect |
 | `src/history.ts` | The `<elsewhere>` digest and `search_conversations`, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, `abandon_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
@@ -62,7 +63,11 @@ conversation recalls everything said elsewhere, private or not; for one trusted 
 prompts and the memory read and edited; basic auth with user `debug`; it shows private conversations and changes what the
 agent is told), `AGENT_SHELVES` (JSON, name → folder: read-only
 folders the memory tools also read, for everyone, never written nor put in the prompt; e.g. `{"code":"/app/src"}`
-lets the agent read its own source, the version running).
+lets the agent read its own source, the version running), `AGENT_MCP_SERVERS` (JSON, name → `{"url", "headers", "rules"}`:
+remote MCP servers over streamable HTTP; all their tools, with the rights of their token, for everyone by default; `${VAR}`
+in a header is read from the environment, so the token stays a secret; e.g.
+`{"notion":{"url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer ${NOTION_MCP_TOKEN}"}}}`; a server
+down at start is left out until the next restart; a tool the server does not mark read-only never goes to an owner draft).
 
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
