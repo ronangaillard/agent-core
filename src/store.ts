@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { tx } from "./db.ts";
 import type { Address, AuthorKind, InboxRow, Post } from "./types.ts";
@@ -143,9 +144,15 @@ const now = () => new Date().toISOString();
 const placeholders = (ids: number[]) => ids.map(() => "?").join(",");
 
 /** Every read and write of the three tables. Each status change and its event go in one transaction. */
+/** One moment of the agent's activity, as the live status reads it. */
+export type Activity = { kind: string; thread_key: string | null; author_kind?: string | null; ref?: number | null; payload?: unknown };
+
 export class Store {
   /** Where alerts go (the owner's line), written in the same transaction as what raised them. */
   alertTo: { address: Address; threadKey: string } | undefined;
+
+  /** Every event as it is written, and the moments not written (a model or a tool starting): for the live status. */
+  readonly activity = new EventEmitter<{ event: [Activity] }>();
 
   constructor(readonly db: DatabaseSync) {}
 
@@ -161,6 +168,7 @@ export class Store {
     this.db
       .prepare("INSERT INTO events (at, kind, thread_key, author_id, author_kind, private, payload, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .run(now(), e.kind, e.thread_key ?? null, e.author_id ?? null, e.author_kind ?? null, e.private ? 1 : 0, e.payload === undefined ? null : JSON.stringify(e.payload), e.ref ?? null);
+    this.activity.emit("event", { kind: e.kind, thread_key: e.thread_key ?? null, author_kind: e.author_kind ?? null, ref: e.ref ?? null, payload: e.payload });
   }
 
   /** What a run did (a tool call, a model call): for the owner to see, never read back by the agent. */

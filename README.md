@@ -33,6 +33,8 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
 | `src/mcp.ts` | Remote MCP servers (`AGENT_MCP_SERVERS`, e.g. Notion): all their tools as the agent's own, bound by rules and traced; a tool not marked read-only is an effect |
 | `src/mcp-auth.ts` · `src/mcp-login.ts` | An MCP server's OAuth sign-in: done once by hand in two steps, kept in `AGENT_MCP_AUTH/<name>.json`, refreshed by the client |
+| `src/status.ts` | The live status (`idle`, `received`, `thinking`, `tool`, `writing`, `coding`) folded from the activity, served as Server-Sent Events on `GET /status` |
+| `devices/m5stick/` | An M5StickC Plus2 that shows the status: the agent's face from its profile picture, animated by state |
 | `src/history.ts` | The `<elsewhere>` digest and `search_conversations`, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, `abandon_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
@@ -74,6 +76,13 @@ with that person's rights): `tsx src/mcp-login.ts notion` in the container print
 service; the browser then fails on `localhost:8976/callback?code=…`, and `tsx src/mcp-login.ts notion '<that address>'`
 finishes. The tokens are kept in `AGENT_MCP_AUTH` (default `data/mcp-auth`, `/data/mcp-auth` in the image) and refreshed;
 the tools load at the next start.
+
+Live status (off unless both are set): `AGENT_STATUS_PORT` and `AGENT_STATUS_TOKEN`. `GET /status` with
+`Authorization: Bearer <token>` streams Server-Sent Events: one `status` event at once, then one at each change,
+`{"state", "detail", "tasks", "at"}`, and a comment every 25 s for proxies. The state is folded from every event the
+store writes, plus two moments it does not write (a model or a tool starting); the detail is a tool's name or a
+repository, never what a message says. A moment with nothing after it falls back to `idle` (or `coding` while a code
+task runs) after 2 minutes. Meant to be reached through a tunnel (Cloudflare) by `devices/m5stick`.
 
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).

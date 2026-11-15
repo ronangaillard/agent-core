@@ -793,6 +793,7 @@ export class Core {
   private async think(brain: Brain, request: Parameters<Brain>[0], trace: { model: string; row: InboxRecord }): Promise<unknown> {
     const abort = new AbortController();
     const onRun = (run: BrainRun) => this.store.trace("run", trace.row.thread_key, trace.row.private, trace.row.id, { model: trace.model, ...run });
+    this.store.activity.emit("event", { kind: "thinking", thread_key: trace.row.thread_key, ref: trace.row.id, payload: { model: trace.model } });
     try {
       return await withTimeout(brain({ ...request, signal: abort.signal, onRun }), this.config.brainTimeoutMs);
     } catch (error) {
@@ -960,6 +961,7 @@ export class Core {
       ...tool,
       run: async (args) => {
         const started = Date.now();
+        this.store.activity.emit("event", { kind: "tool_start", thread_key: row.thread_key, ref: row.id, payload: { tool: tool.name } });
         const record = (result: string, ok: boolean) =>
           this.store.trace("tool", row.thread_key, row.private, row.id, { tool: tool.name, args: cut(JSON.stringify(args)), result: cut(result), ok, ms: Date.now() - started });
         try {

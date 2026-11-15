@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeBrain } from "./claude.ts";
 import { mcpTools, type McpServerConfig } from "./mcp.ts";
+import { StatusFeed, statusServer } from "./status.ts";
 import { emailConnector } from "./connectors/email.ts";
 import { debugServer } from "./debug.ts";
 import { slackConnector } from "./connectors/slack.ts";
@@ -131,6 +132,12 @@ const core = new Core({
   },
 });
 
+/** The live status for a small screen (devices/m5stick), off unless both are set: GET /status, Server-Sent Events. */
+const status =
+  process.env.AGENT_STATUS_PORT && process.env.AGENT_STATUS_TOKEN
+    ? statusServer({ feed: new StatusFeed(core.store), port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN })
+    : undefined;
+
 /** GitHub deployments, announced in a channel; off without a webhook secret. */
 const github =
   process.env.GITHUB_WEBHOOK_SECRET && process.env.GITHUB_DEPLOY_CHANNEL
@@ -145,7 +152,7 @@ const github =
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.all([core.stop(), github?.stop(), debug?.stop()]).finally(() => process.exit(0));
+    void Promise.all([core.stop(), github?.stop(), debug?.stop(), status?.stop()]).finally(() => process.exit(0));
   });
 }
 
