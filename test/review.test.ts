@@ -42,7 +42,8 @@ test("catch-up: the cursor moves only when a pass completes; a failed pass is tr
   const connector = new FakeConnector(world);
   connector.failingCatchUps = 1;
   connector.missed = [{ ...world.say("while you were away", { thread: "dm" }), sent_at: new Date(Date.now() - 3600_000).toISOString() }];
-  const core = makeCore(path, connector, echoBrain().brain, { backoffMs: [40] });
+  // A backoff long enough that the check below runs before the retry, even on a loaded machine.
+  const core = makeCore(path, connector, echoBrain().brain, { backoffMs: [400] });
   await core.start();
   // A live message during the owed catch-up does not move the cursor past the gap.
   connector.sink!(world.say("live now", { thread: "live" }));

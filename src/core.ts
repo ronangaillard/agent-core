@@ -267,8 +267,12 @@ export class Core {
   private async catchUp(connector: Connector): Promise<void> {
     if (!connector.catchUp || this.stopped || this.catchingNow.has(connector.id)) return;
     const cursor = this.store.cursor(connector.id);
-    if (!cursor) return void this.catching.delete(connector.id);
+    if (!cursor) {
+      this.store.catchUpRetryCleared(connector.id);
+      return void this.catching.delete(connector.id);
+    }
     this.catchingNow.add(connector.id);
+    this.store.catchUpRetryCleared(connector.id);
     this.catchAgain.delete(connector.id);
     const started = new Date().toISOString();
     const since = new Date(Math.max(Date.parse(cursor) - 60_000, Date.now() - this.config.catchUpMaxMs)).toISOString();
@@ -314,7 +318,9 @@ export class Core {
   private wakeCatchUps() {
     for (const id of this.store.catchUpsDue()) {
       const connector = this.connectors.get(id);
-      if (connector && this.catching.has(id)) void this.catchUp(connector);
+      if (connector && this.catching.has(id) && !this.catchingNow.has(id)) void this.catchUp(connector);
+      // Nobody catches up there any more: the retry goes, or the timer would fire on it again and again.
+      else if (!connector || !this.catching.has(id)) this.store.catchUpRetryCleared(id);
     }
   }
 

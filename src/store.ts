@@ -611,6 +611,11 @@ export class Store {
     this.db.prepare("UPDATE cursors SET failures = 0, retry_at = NULL WHERE connector = ?").run(connector);
   }
 
+  /** A retry no longer waited for: the pass started, or nobody catches up there any more. The count stays. */
+  catchUpRetryCleared(connector: string) {
+    this.db.prepare("UPDATE cursors SET retry_at = NULL WHERE connector = ?").run(connector);
+  }
+
   /** A pass failed: tried again at this date (on the one timer), or not at all past the cap, with an alert. */
   catchUpFailed(connector: string, retryAt: string | null, alert?: string): number {
     return tx(this.db, () => {
@@ -733,6 +738,10 @@ export class Store {
    * The next time something becomes due, for the one timer. Only the future: what is due now waits for its wake()
    * (a busy thread frees itself with one), so the timer never spins.
    */
+  /**
+   * The timer's next date. A catch-up retry counts even when already past (its date may pass before the timer is
+   * armed, and nothing else would run it): it is cleared as soon as its pass starts, so it cannot fire in a loop.
+   */
   nextDue(): string | undefined {
     const at = now();
     const row = this.db
@@ -744,9 +753,9 @@ export class Store {
            UNION ALL
            SELECT due_at AS at FROM reminders WHERE due_at > ?
            UNION ALL
-           SELECT retry_at AS at FROM cursors WHERE retry_at > ?)`,
+           SELECT retry_at AS at FROM cursors WHERE retry_at IS NOT NULL)`,
       )
-      .get(at, at, at, at) as Row | undefined;
+      .get(at, at, at) as Row | undefined;
     return row?.at === null || row?.at === undefined ? undefined : String(row.at);
   }
 }

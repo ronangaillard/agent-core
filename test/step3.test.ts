@@ -230,10 +230,13 @@ test("github: a signed deployment_status becomes one event in the configured con
     JSON.stringify({ repository: { full_name: "acme/api" }, deployment: { id: 42, ref: "main", environment: "production" }, deployment_status: { state, created_at: new Date().toISOString() } });
   const sign = (body: string) => `sha256=${createHmac("sha256", "s3cret").update(body).digest("hex")}`;
 
-  assert.equal(github.handle("deployment_status", "sha256=bad", delivery("success")), 401);
-  assert.equal(github.handle("deployment_status", sign(delivery("in_progress")), delivery("in_progress")), 202);
-  assert.equal(github.handle("deployment_status", sign(delivery("success")), delivery("success")), 202);
-  assert.equal(github.handle("deployment_status", sign(delivery("success")), delivery("success")), 202);
+  // Each body built once: it carries the time, and a signature over another body is (rightly) refused.
+  const working = delivery("in_progress");
+  const done = delivery("success");
+  assert.equal(github.handle("deployment_status", "sha256=bad", done), 401);
+  assert.equal(github.handle("deployment_status", sign(working), working), 202);
+  assert.equal(github.handle("deployment_status", sign(done), done), 202);
+  assert.equal(github.handle("deployment_status", sign(done), done), 202);
   await waitFor(() => textsIn(connector, "deploys").length === 1);
   await sleep(50);
   assert.deepEqual(textsIn(connector, "deploys"), ["deployed!"]);
