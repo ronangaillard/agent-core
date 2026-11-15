@@ -31,7 +31,7 @@ async function fakeServer(): Promise<{ url: string; auth: string[]; close: () =>
 test("mcp: a remote server's tools become the agent's, read-only ones without effect, its token from the environment", async () => {
   const server = await fakeServer();
   const logs: string[] = [];
-  const tools = await mcpTools({ notion: { url: server.url, headers: { Authorization: "Bearer ${FAKE_TOKEN}" } } }, { FAKE_TOKEN: "t0k" }, (line) => logs.push(line));
+  const tools = await mcpTools({ notion: { url: server.url, headers: { Authorization: "Bearer ${FAKE_TOKEN}" } } }, { env: { FAKE_TOKEN: "t0k" }, log: (line) => logs.push(line) });
   assert.deepEqual(tools.map((t) => [t.name, t.effect, t.rules]), [
     ["search", false, ["all"]],
     ["create-page", true, ["all"]],
@@ -50,10 +50,28 @@ test("mcp: a server down at start, or a token missing, is left out without stopp
   const logs: string[] = [];
   const tools = await mcpTools(
     { down: { url: "http://127.0.0.1:1/mcp" }, notoken: { url: "http://127.0.0.1:1/mcp", headers: { Authorization: "Bearer ${MISSING}" } } },
-    {},
-    (line) => logs.push(line),
+    { env: {}, log: (line) => logs.push(line) },
   );
   assert.deepEqual(tools, []);
   assert.match(logs.join("\n"), /mcp down: left out/);
   assert.match(logs.join("\n"), /mcp notoken: left out \(MISSING is not set\)/);
+});
+
+test("mcp: an oauth sign-in is kept in a file only its owner reads, the pending step cleared once signed in", async () => {
+  const { mkdtempSync, statSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { FileAuth } = await import("../src/mcp-auth.ts");
+  const dir = mkdtempSync(join(tmpdir(), "mcp-auth-"));
+  const auth = new FileAuth(dir, "notion");
+  assert.equal(auth.tokens(), undefined);
+  assert.throws(() => auth.codeVerifier(), /no sign-in in progress/);
+  auth.saveClientInformation({ client_id: "c1" });
+  auth.saveCodeVerifier("v1");
+  auth.redirectToAuthorization(new URL("https://example.com/authorize?x=1"));
+  assert.equal(auth.load().pending, "https://example.com/authorize?x=1");
+  assert.equal(auth.codeVerifier(), "v1");
+  auth.saveTokens({ access_token: "a", token_type: "bearer", refresh_token: "r" });
+  assert.deepEqual(auth.load(), { client: { client_id: "c1" }, tokens: { access_token: "a", token_type: "bearer", refresh_token: "r" } });
+  assert.equal(statSync(join(dir, "notion.json")).mode & 0o777, 0o600);
 });

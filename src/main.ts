@@ -91,7 +91,8 @@ const memory = new Memory(process.env.AGENT_MEMORY ?? "data/memory", shelves, pr
  * AGENT_MCP_SERVERS: remote MCP servers whose tools the agent gets, all of them, with their token's rights, e.g.
  * {"notion":{"url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer ${NOTION_MCP_TOKEN}"}}}.
  */
-const mcp = await mcpTools(JSON.parse(process.env.AGENT_MCP_SERVERS ?? "{}") as Record<string, McpServerConfig>);
+const mcpServers = JSON.parse(process.env.AGENT_MCP_SERVERS ?? "{}") as Record<string, McpServerConfig>;
+const mcp = await mcpTools(mcpServers, { authDir: process.env.AGENT_MCP_AUTH ?? "data/mcp-auth" });
 
 /**
  * The web view: the tables (read-only), and the prompts and the memory (read and edited). Off unless both are set:

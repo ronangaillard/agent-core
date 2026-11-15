@@ -32,6 +32,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |
 | `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
 | `src/mcp.ts` | Remote MCP servers (`AGENT_MCP_SERVERS`, e.g. Notion): all their tools as the agent's own, bound by rules and traced; a tool not marked read-only is an effect |
+| `src/mcp-auth.ts` · `src/mcp-login.ts` | An MCP server's OAuth sign-in: done once by hand in two steps, kept in `AGENT_MCP_AUTH/<name>.json`, refreshed by the client |
 | `src/history.ts` | The `<elsewhere>` digest and `search_conversations`, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, `abandon_code_task`, the `<in_progress>` block |
 | `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
@@ -68,6 +69,11 @@ remote MCP servers over streamable HTTP; all their tools, with the rights of the
 in a header is read from the environment, so the token stays a secret; e.g.
 `{"notion":{"url":"https://mcp.notion.com/mcp","headers":{"Authorization":"Bearer ${NOTION_MCP_TOKEN}"}}}`; a server
 down at start is left out until the next restart; a tool the server does not mark read-only never goes to an owner draft).
+With `"oauth": true` instead of a header, the agent signs in as a person (Notion: `{"notion":{"url":"https://mcp.notion.com/mcp","oauth":true}}`,
+with that person's rights): `tsx src/mcp-login.ts notion` in the container prints the address to open, signed in to the
+service; the browser then fails on `localhost:8976/callback?code=…`, and `tsx src/mcp-login.ts notion '<that address>'`
+finishes. The tokens are kept in `AGENT_MCP_AUTH` (default `data/mcp-auth`, `/data/mcp-auth` in the image) and refreshed;
+the tools load at the next start.
 
 GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).

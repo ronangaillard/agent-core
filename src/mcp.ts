@@ -1,13 +1,25 @@
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
+import { FileAuth } from "./mcp-auth.ts";
 import type { Rule, ToolDef, ToolResult } from "./types.ts";
 
-/** A remote MCP server: its URL, its headers (${VAR} taken from the environment), who may use its tools. */
-export type McpServerConfig = { url: string; headers?: Record<string, string>; rules?: Rule[] };
+/**
+ * A remote MCP server: its URL, its headers (${VAR} taken from the environment), who may use its tools. oauth: signed
+ * in once by hand (mcp-login.ts), the tokens kept in the auth folder and refreshed.
+ */
+export type McpServerConfig = { url: string; headers?: Record<string, string>; oauth?: boolean; rules?: Rule[] };
+export type McpOptions = { env?: NodeJS.ProcessEnv; log?: (line: string) => void; authDir?: string };
 
 /** What a tool may hand back to the model, at most. */
 const TEXT_MAX = 50_000;
+
+/** The transport to one server, with its headers and its sign-in. */
+export function transportOf(name: string, server: McpServerConfig, { env = process.env, authDir = "data/mcp-auth" }: McpOptions = {}) {
+  const headers = Object.fromEntries(Object.entries(server.headers ?? {}).map(([key, value]) => [key, expand(value, env)]));
+  return new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers }, ...(server.oauth ? { authProvider: new FileAuth(authDir, name) } : {}) });
+}
 
 const expand = (value: string, env: NodeJS.ProcessEnv) =>
   value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => {
@@ -22,16 +34,17 @@ const expand = (value: string, env: NodeJS.ProcessEnv) =>
  * read-only counts as an effect. The connection is opened again when a call fails; a server down at start is left
  * out (logged) rather than stopping the agent.
  */
-export async function mcpTools(servers: Record<string, McpServerConfig>, env: NodeJS.ProcessEnv = process.env, log: (line: string) => void = console.error): Promise<ToolDef[]> {
+export async function mcpTools(servers: Record<string, McpServerConfig>, options: McpOptions = {}): Promise<ToolDef[]> {
+  const log = options.log ?? console.error;
   const tools: ToolDef[] = [];
   for (const [name, server] of Object.entries(servers)) {
     try {
-      const headers = Object.fromEntries(Object.entries(server.headers ?? {}).map(([key, value]) => [key, expand(value, env)]));
+      transportOf(name, server, options); // a missing ${VAR}: left out now, not at the first call
       let client: Promise<Client> | undefined;
       const connect = () =>
         (client ??= (async () => {
           const c = new Client({ name: "agent-core", version: "1.0.0" });
-          await c.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } }));
+          await c.connect(transportOf(name, server, options));
           return c;
         })().catch((error: unknown) => {
           client = undefined;
@@ -74,7 +87,8 @@ export async function mcpTools(servers: Record<string, McpServerConfig>, env: No
       }
       log(`mcp ${name}: ${listed.tools.length} tools`);
     } catch (error) {
-      log(`mcp ${name}: left out (${error instanceof Error ? error.message : String(error)})`);
+      const unsigned = error instanceof UnauthorizedError;
+      log(`mcp ${name}: left out (${unsigned ? `not signed in: node_modules/.bin/tsx src/mcp-login.ts ${name}` : error instanceof Error ? error.message : String(error)})`);
     }
   }
   return tools;
