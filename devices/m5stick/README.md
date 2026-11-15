@@ -28,3 +28,8 @@ arduino-cli upload --fqbn esp32:esp32:m5stack_stickc_plus2 -p /dev/cu.usbserial-
 Without `secrets.h` it runs on USB only. A line on the serial port (115200) sets the state, for a test:
 `tool notion-search`, `coding agent-core`; `shot` sends the screen back as raw RGB565 (240 x 135, big-endian), after a
 `SHOT 240 135` line.
+
+## Troubleshooting
+
+If the screen stays grey, check the Wi-Fi first: the ESP32 only sees 2.4 GHz networks, not 5 GHz.
+Then check `STATUS_URL` and `STATUS_TOKEN` in `secrets.h`: a wrong token gets the stream refused, and the face stays grey.
