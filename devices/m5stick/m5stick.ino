@@ -1,5 +1,5 @@
 // The agent on an M5StickC Plus2: its face (from its profile picture) shows what it is doing, streamed live from
-// agent-core's GET /status (Server-Sent Events). Button A: sound on/off. Button B: brightness.
+// agent-core's GET /status (Server-Sent Events). Silent. Button A or B: brightness.
 // For a test without Wi-Fi, a line on the USB serial port sets the state: "tool notion-search", "coding agent-core".
 
 #include <M5Unified.h>
@@ -232,20 +232,12 @@ const char* const* toolIcon(const String& t, String& word) {
 // --- drawing loop --------------------------------------------------------------------------------------------------
 Status shown, target;
 uint32_t shownAt = 0, idleSince = 0, nextBlink = 3000;
-bool muted = false;
 int brightness = 2;  // index in LEVELS
 static const uint8_t LEVELS[] = {30, 80, 140, 220};
 uint32_t toastUntil = 0;
 String toast;
 
 uint32_t holdOf(State s) { return s == IDLE || s == CODING ? 0 : s == RECEIVED ? 1800 : 1500; }
-
-void chime() {
-  if (muted) return;
-  M5.Speaker.tone(2200, 50);
-  delay(70);
-  M5.Speaker.tone(3000, 70);
-}
 
 void panel(const char* const* ic, const String& title, const String& sub, uint16_t ink) {
   canvas.fillRoundRect(PANEL_X, 4, PANEL_W, 108, 8, C_BLACK);
@@ -272,7 +264,7 @@ void footer(uint32_t now) {
   canvas.drawString(!wireless ? "usb" : online ? "en ligne" : hasWifi ? "connexion..." : "wifi...", PANEL_X + 12, H - 2);
   canvas.setTextDatum(bottom_right);
   int level = M5.Power.getBatteryLevel();
-  canvas.drawString(String(muted ? "muet " : "") + (level >= 0 ? String(level) + "%" : ""), W - 4, H - 2);
+  canvas.drawString(level >= 0 ? String(level) + "%" : "", W - 4, H - 2);
 }
 
 void draw(uint32_t now) {
@@ -369,9 +361,8 @@ void setup() {
   canvas.setColorDepth(16);
   canvas.createSprite(W, H);
   prefs.begin("steve", false);
-  muted = prefs.getBool("muted", false);
   brightness = prefs.getInt("bright", 2);
-  M5.Speaker.setVolume(90);
+  M5.Speaker.end();
   updates = xQueueCreate(1, sizeof(Status));
   xTaskCreatePinnedToCore(network, "network", 12288, nullptr, 1, nullptr, 0);
   shownAt = idleSince = millis();
@@ -381,12 +372,7 @@ void loop() {
   M5.update();
   uint32_t now = millis();
 
-  if (M5.BtnA.wasPressed()) {
-    muted = !muted;
-    prefs.putBool("muted", muted);
-    toast = muted ? "son coupe" : "son actif", toastUntil = now + 1500;
-  }
-  if (M5.BtnB.wasPressed()) {
+  if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
     brightness = (brightness + 1) % 4;
     prefs.putInt("bright", brightness);
     toast = "luminosite " + String(brightness + 1) + "/4", toastUntil = now + 1500;
@@ -409,7 +395,6 @@ void loop() {
   // Each moment stays long enough to be seen; the latest one wins.
   bool changed = target.state != shown.state || strcmp(target.detail, shown.detail) != 0 || target.tasks != shown.tasks;
   if (changed && now - shownAt >= holdOf(shown.state)) {
-    if (target.state == RECEIVED && shown.state != RECEIVED) chime();
     if (target.state == IDLE && shown.state != IDLE) idleSince = now;
     if (target.state != IDLE) idleSince = now;
     shown = target;

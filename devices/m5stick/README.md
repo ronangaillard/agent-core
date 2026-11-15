@@ -6,15 +6,14 @@ doing. It streams `GET /status` (Server-Sent Events, see the main README) and re
 | state | face | panel |
 |---|---|---|
 | `idle` | blinks now and then; after 10 min, eyes closed, "z", screen dimmed | au repos / dodo |
-| `received` | wide eyes, the hat's lights flash, a "!"; a chime (button A mutes it) | message ! |
+| `received` | wide eyes, the hat's lights flash, a "!" | message ! |
 | `thinking` | looks up, a light runs along the hat, thought bubbles | il cogite (il lit: triage) |
 | `tool` | looks left and right; an icon per tool family (Notion, memory, search, reminder…) | Notion / outil + the tool |
 | `writing` | the mouth moves | il ecrit... |
 | `coding` | eyes scan, lights cross on the hat | il code + the repository |
 
 Each moment stays at least 1.5 s on screen; the latest one wins. Offline (no Wi-Fi or no stream), the face turns grey
-and it reconnects alone, waiting longer each time (2 s to 1 min). Button A: sound on/off; button B: brightness. Both are
-kept across restarts.
+and it reconnects alone, waiting longer each time (2 s to 1 min). No sound. Button A or B: brightness, kept across restarts.
 
 ## Build and flash
 
