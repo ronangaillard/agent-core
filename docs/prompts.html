@@ -49,7 +49,7 @@ td.f{font-family:'JetBrains Mono',monospace;font-size:12.5px;white-space:nowrap}
 <div class="label">message</div>
 <div class="part"><span class="tag data">Now:</span><span>weekday, local time, time zone; every message line carries its local time</span></div>
 <div class="part"><span class="tag data">&lt;elsewhere&gt;</span><span>other recent conversations (72 h), with message:&lt;id&gt; and local times</span></div>
-<div class="part"><span class="tag data">&lt;conversation&gt;</span><span>this thread, read from the connector</span></div>
+<div class="part"><span class="tag data">&lt;conversation&gt;</span><span>this thread, read from the connector; a shared file shows as [image: … · file:&lt;id&gt;], for open_file</span></div>
 <div class="part"><span class="tag data">&lt;in_progress&gt;</span><span>code tasks, reminders, what waits for the owner</span></div>
 <div class="part"><span class="tag data">already did</span><span>the acted events of this thread</span></div>
 <div class="part"><span class="tag">ask-new (+ ask-late) · ask-event · ask-draft</span><span>the ask: new messages (late: caught up), an event from a source, a draft in the owner's name ({{count}}, {{event}}, {{owner}})</span></div>
@@ -73,12 +73,15 @@ td.f{font-family:'JetBrains Mono',monospace;font-size:12.5px;white-space:nowrap}
 </div>
 
 <div class="card" style="border: 2px solid #2457C5">
-<div class="title">3 · The code task <span class="sub">· runners/claude-code.ts · claude -p in the workshop (opus)</span></div>
+<div class="title">3 · The code task <span class="sub">· runners/claude-code.ts · claude -p in the workshop (CLAUDE_TASK_MODEL, default opus)</span></div>
 <div class="label">system</div>
 <div class="part"><span class="tag">persona</span><span>the same file again</span></div>
 <div class="part"><span class="tag">code-task</span><span>follow the repository's CLAUDE.md and skills, checks, commit, push {{branch}} and open the PR itself; nobody to ask ({{repo}}, {{branch}})</span></div>
+<div class="part"><span class="tag data">the repository</span><span>its own CLAUDE.md, skills, hooks and agents, loaded by Claude Code itself; none of its MCP servers, no web tool</span></div>
 <div class="label">message</div>
-<div class="part"><span class="tag data">request · conversation · git</span><span>the request, the thread it comes from, the branch's last commits</span></div>
+<div class="part"><span class="tag data">request · conversation · git</span><span>the request, the thread it comes from, the branch's last commits; all of it through the session's environment, never a file in the copy</span></div>
+<div class="label">output</div>
+<div>{ report }: posted in the task's conversation. On the way, its news is its task list's item in progress (TaskCreate, TaskUpdate).</div>
 </div>
 
 </div>

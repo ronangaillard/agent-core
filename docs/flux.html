@@ -310,11 +310,11 @@ batch_id        the originating batch (its inbox ids);
                 NULL for send, report, alert
 thread_key      TEXT
 address         JSON
-kind            reply | send | report | alert
+kind            reply | send | report | alert | reaction
                 (send: send(), delivered right
                  away; report: task report,
                  queued)
-payload         JSON  ONE post: { text, as?: owner }
+payload         JSON  ONE post: { text, as?: owner } | { reaction }
                 (as owner: approved draft)
 status          held | pending | delivering
                 | delivered | dead
@@ -341,8 +341,10 @@ kind         received · ignored · intercepted
              · delivery_failed (each transient
                attempt) · dead (+ reason)
              · reminder_set · reminder_due
-             · task_started · task_waiting · task_done
-             · capped
+             · task_started · task_waiting · task_failed
+             · task_done · task_abandoned · capped
+             · tool · run · error (the trace: every tool
+               call and model run, for the debug view)
 thread_key · address · author_id · author_kind
 private      0/1
 payload      JSON  drafted, silent: resolved author,

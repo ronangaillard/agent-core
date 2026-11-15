@@ -32,7 +32,7 @@ a{color:#2457C5}a:hover{color:#1A3F91}
 <svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 672px; top: 1372px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #A8A8A0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-10" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#A8A8A0" stroke="none" style="stroke: none; fill: #A8A8A0; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-10)"></path></svg>
 
 <div style="position: absolute; left: 64px; top: 40px; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Tools and scopes: who may do what</div>
-<div style="position: absolute; left: 64px; top: 80px; width: 2400px; color: #5E5E58">The model chooses which tool to call and with which arguments. The code decides which ones exist for it, what they know about the conversation (the scope), and rechecks before executing. The tools are an in-process MCP server, built for each respond().</div>
+<div style="position: absolute; left: 64px; top: 80px; width: 2400px; color: #5E5E58">The model chooses which tool to call and with which arguments. The code decides which ones exist for it, what they know about the conversation (the scope), and rechecks before executing. The tools are an in-process MCP server, built for each respond(); the tools of a remote MCP server (Notion) are wrapped into it, under the same rules.</div>
 
 <div style="position: absolute; left: 64px; top: 400px; width: 240px; height: 160px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">Message #41</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">author_id: U_RONAN (owner)
 place: #tech, public
@@ -58,7 +58,7 @@ ToolContext = { scope, threadKey,
 → drives the tools, the memory
   and the prompt's situation</span></span></div>
 
-<div style="position: absolute; left: 880px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">bind(tools, context)</b> <span style="color: #5E5E58">· rules on each ToolDef</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">tool                       rules
+<div style="position: absolute; left: 880px; top: 270px; width: 520px; height: 420px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">bind(tools, context)</b> <span style="color: #5E5E58">· rules on each ToolDef</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">tool                       rules
 memory_list · memory_read  all
 memory_write               owner (all if
                            MEMORY_WRITERS=all)
@@ -66,16 +66,16 @@ search_conversations       all
 read_conversation          all (privacy rule)
 search_messages            owner (all if
                            PRIVACY=off)
-open_file                  all (image, text)
+open_file                  all (if a connector has file())
 send                       all (+ target's rules)
 set · list · cancel_reminder  all
 start · abandon_code_task  all (if runner)
-MCP servers' tools          all (AGENT_MCP_SERVERS)
+a remote MCP server's tools  its rules (default all)
 
 keeps tools that allows(rules, scope)
 accepts, rechecks at execution;
-effect: an owner draft has no
-tool with an effect</span></span></div>
+effect: an owner draft has no tool with an
+effect; every call traced (events: tool)</span></span></div>
 
 <div style="position: absolute; left: 1500px; top: 280px; width: 520px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">query()</b> <span style="color: #5E5E58">· Agent SDK, in respond()</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">query({ system, prompt,
   mcpServers, allowedTools,
@@ -109,14 +109,37 @@ send: key (thread, batch, place, n-th)
 written with the effect, same transaction;
 already there → "Already sent"</span></span></div>
 
-<div style="position: absolute; left: 2120px; top: 470px; width: 600px; height: 180px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">External MCPs · not yet</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">Notion, prod_anon: not kept from agent-core
-an external MCP does not see the scope:
-only to isolate secrets or a
-third-party service, the day one is needed</span></span></div>
+<div style="position: absolute; left: 2120px; top: 450px; width: 600px; height: 240px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border-radius: 10px; border: 2px solid #2457C5"><span><b style="font-size: 15px">Remote MCP servers</b> <span style="color: #5E5E58">· src/mcp.ts · AGENT_MCP_SERVERS</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">{ "notion": { url, headers | oauth: true, rules? } }
+streamable HTTP; tools listed once, at start: each one
+becomes a ToolDef (same bind, same trace); all of the
+server's tools, with the rights of its token
+rules: the server's, default all; the server never sees
+  the scope: the rule is checked here, before the call
+not marked readOnlyHint → effect: kept from owner drafts
+text cut at 50,000 chars; an image is shown to the model
+a failed call: reconnects at the next one, not retried</span></span></div>
 
 <div style="position: absolute; left: 2120px; top: 700px; width: 600px; height: 140px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">No native file tools</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">memory_list · memory_read · memory_write
 confined in code (resolve, symlinks followed);
 shelves read-only: code/ = its own code</span></span></div>
+
+<div style="position: absolute; left: 64px; top: 760px; width: 640px; height: 220px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border-radius: 10px; border: 1px solid #D9D9D4"><span><b style="font-size: 15px">open_file</b> <span style="color: #5E5E58">· src/act.ts · only if a connector has file()</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">a message shows its files: [image: name · file:&lt;id&gt;]
+open_file(file) → connector.file(id); the conversation's
+  connector first (Slack: files:read, the bot's token,
+  else the owner's for what search_messages found)
+image (png, jpeg, gif, webp; 5 MB at most): shown to the
+  model; a large one on Slack: its 1024 px thumbnail
+text (text/*, json, csv, code…): read, cut at 30,000 chars
+anything else: "it cannot be opened"; read-only: no effect</span></span></div>
+
+<div style="position: absolute; left: 740px; top: 760px; width: 660px; height: 220px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border-radius: 10px; border: 1px solid #D9D9D4"><span><b style="font-size: 15px">Signing in to an MCP server</b> <span style="color: #5E5E58">· src/mcp-auth.ts · src/mcp-login.ts</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">headers: { "Authorization": "Bearer ${VAR}" }: ${VAR} read from the
+  environment, the token stays a secret
+oauth: true (Notion's hosted MCP, as a person, with their rights):
+  1. tsx src/mcp-login.ts notion → prints the address to open
+  2. the browser ends on localhost:8976/callback?code=… (nothing
+     listens); tsx src/mcp-login.ts notion '&lt;that address&gt;'
+tokens in AGENT_MCP_AUTH/&lt;name&gt;.json (mode 600), refreshed by the
+MCP client; down or not signed in at start: left out until restart</span></span></div>
 
 <div style="position: absolute; left: 88px; top: 1020px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #2457C5">DONE: TOOLS SPEAK ADDRESS, NOT SLACK</div>
 
@@ -127,9 +150,9 @@ shelves read-only: code/ = its own code</span></span></div>
 <div style="position: absolute; left: 768px; top: 1204px; width: 760px; height: 120px; box-sizing: border-box; padding: 10px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace">send(to, text)</b> · delivered right away (outbox send + acted), returns the permalink or the error<br>to: named destination; for the owner, a person or message:&lt;id&gt; <b>visible from this scope</b><br><span style="color: #5E5E58">key (n-th send to this place in the batch) and acted event written with delivering before the call: a re-run sees them; refused if the target is the current thread; timeout → "status unknown"</span></span></div>
 
 <div style="position: absolute; left: 112px; top: 1340px; width: 560px; height: 72px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b>slack_lire_fil · slack_lire_canal · slack_regarder_image</b> (old Steve)</span></div>
-<div style="position: absolute; left: 768px; top: 1340px; width: 760px; height: 72px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span>not carried over: the thread is read by read() before respond(); writing goes through the Address</span></div>
+<div style="position: absolute; left: 768px; top: 1340px; width: 760px; height: 72px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span>the thread is read by read() before respond(); another conversation: read_conversation; an image or a text file: <b style="font-family: 'JetBrains Mono', monospace">open_file(file:&lt;id&gt;)</b>, on any connector with file()</span></div>
 
-<div style="position: absolute; left: 1608px; top: 1100px; width: 1088px; height: 312px; box-sizing: border-box; padding: 20px 24px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">What we don't do</b><br><br>• <b>No plugin framework</b>: a list of ToolDef (name, input zod, rules, effect, run) passed to the core, bound by bind().<br>• <b>No external MCP per domain</b>: a separate process does not see the scope, it would have to be passed via env or hooks, with processes to manage.<br>• <b>No tool per need</b>: generic capabilities (memory and shelves, send, reminders, tasks), never a business-specific tool.<br><br><span style="color: #5E5E58">Done in agent-core: the context carries the address, Slack writing goes through send(to, text), and tools with effects write an acted event.</span></span></div>
+<div style="position: absolute; left: 1608px; top: 1100px; width: 1088px; height: 312px; box-sizing: border-box; padding: 20px 24px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">What we don't do</b><br><br>• <b>No plugin framework</b>: a list of ToolDef (name, input zod, rules, effect, run) passed to the core, bound by bind().<br>• <b>No MCP server of our own per domain</b>: a separate process does not see the scope, it would have to be passed via env or hooks, with processes to manage. A third party's hosted MCP (Notion) is taken as it is: its tools become ToolDefs.<br>• <b>No tool per need</b>: generic capabilities (memory and shelves, send, files, reminders, tasks), never a business-specific tool.<br><br><span style="color: #5E5E58">Done in agent-core: the context carries the address, Slack writing goes through send(to, text), and tools with effects write an acted event.</span></span></div>
 
 <div style="position: absolute; left: 308px; top: 452px; width: 88px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">message</div>
 <div style="position: absolute; left: 784px; top: 452px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">Scope</div>

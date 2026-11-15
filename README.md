@@ -37,8 +37,8 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `devices/m5stick/` | An M5StickC Plus2 that shows the status: the agent's face from its profile picture, animated by state |
 | `src/history.ts` | The `<elsewhere>` digest and `search_conversations`, on `events` |
 | `src/tasks.ts` | Code tasks: the runner contract, `start_code_task`, `abandon_code_task`, the `<in_progress>` block |
-| `src/runners/claude-code.ts` | The runner: a copy per task, a sandboxed Claude Code session, push and PR from this process |
-| `src/runners/apercu.ts` | A remote terminal for the runner: steve-apercu's workshop, a container per copy |
+| `src/runners/claude-code.ts` | The runner: a copy per task, its whole Claude Code session in the workshop, which pushes and opens the PR itself |
+| `src/runners/apercu.ts` | steve-apercu's workshop: a fresh container per run, the session's output streamed line by line |
 | `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
@@ -88,12 +88,10 @@ GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_D
 `GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
 The webhook takes the `deployment_status` event; only final states count, once per deployment.
 
-Code tasks (off unless both are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default);
-`GITHUB_TOKEN_<OWNER>` for another owner's repositories (`GITHUB_TOKEN_ACME_LABS` for `acme-labs/…`);
-`AGENT_WORKSPACE` (default `data/workspace`). The session's terminal runs in Claude Code's sandbox (on Linux it needs
-`bubblewrap`): it writes only in the task's copy and reaches only package registries. Or, with `STEVE_APERCU_URL` and
-`STEVE_APERCU_TOKEN`, Claude Code's terminal is off and every command runs in a container per copy of
-[steve-apercu](src/runners/apercu.ts)'s workshop (the copy mounted at the same path); the file tools stay local.
+Code tasks (off unless all are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default),
+`STEVE_APERCU_URL` and `STEVE_APERCU_TOKEN` (the workshop where each session runs); `GITHUB_TOKEN_<OWNER>` for
+another owner's repositories (`GITHUB_TOKEN_ACME_LABS` for `acme-labs/…`), fine-grained, limited to the task
+repositories (the session holds it); `AGENT_WORKSPACE` (default `data/workspace`); `CLAUDE_TASK_MODEL` (default `opus`).
 
 E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
 `AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS`

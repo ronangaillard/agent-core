@@ -23,14 +23,15 @@ a{color:var(--accent)}
 <body>
 <main>
 <h1>agent-core architecture</h1>
-<p>Six hand-drawn boards of how <a href="https://github.com/ronangaillard/agent-core">agent-core</a> works: the durable core, one message end to end, the tools and their rights, code tasks, the connector contract, and the prompts. They are large fixed-size diagrams: scroll and zoom out.</p>
+<p>Seven hand-drawn boards of how <a href="https://github.com/ronangaillard/agent-core">agent-core</a> works: the durable core, one message end to end, the tools and their rights, code tasks, the connector contract, the prompts, and the live status. They are large fixed-size diagrams: scroll and zoom out.</p>
 <ol>
 <li><a class="board" href="main.html"><b>Architecture</b><span>Inbound, the core, outbound; SQLite tables, the scheduler, guardrails.</span></a></li>
 <li><a class="board" href="flux.html"><b>One Slack message, end to end</b><span>From the websocket to the reply in the thread, step by step, with the tables' columns.</span></a></li>
-<li><a class="board" href="tools.html"><b>Tools and scopes</b><span>Who may use what: rights decided by code, checked twice.</span></a></li>
-<li><a class="board" href="tasks.html"><b>Code tasks</b><span>A task, a copy, a branch, a PR; continued later from any conversation.</span></a></li>
+<li><a class="board" href="tools.html"><b>Tools and scopes</b><span>Who may use what: rights decided by code, checked twice; shared files, remote MCP servers (Notion) and their sign-in.</span></a></li>
+<li><a class="board" href="tasks.html"><b>Code tasks</b><span>A task, a copy, a branch, a PR; a Claude Code session in its own container; continued later from any conversation.</span></a></li>
 <li><a class="board" href="connector.html"><b>The Connector contract</b><span>What a connector gives the core, and what each side never does.</span></a></li>
 <li><a class="board" href="prompts.html"><b>Prompts and files</b><span>Which prompt file goes where (reply, triage gate, code task), the memory, and the web view that edits them.</span></a></li>
+<li><a class="board" href="status.html"><b>Live status</b><span>What the agent is doing now: six states pushed on GET /status, and the M5StickC Plus2 that shows them with its face.</span></a></li>
 </ol>
 </main>
 </body>

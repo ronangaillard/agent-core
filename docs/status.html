@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>agent-core — Live status</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457C5}a:hover{color:#1A3F91}
+</style>
+</helmet>
+<div style="position: relative; width: 2560px; height: 1218px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
+
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 444px; top: 366px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 1100px; top: 366px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 1716px; top: 366px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+
+<div style="position: absolute; left: 64px; top: 40px; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Live status: what the agent is doing, on a small screen</div>
+<div style="position: absolute; left: 64px; top: 80px; width: 2400px; color: #5E5E58">One current state (idle, received, thinking, tool, writing, coding) folded in memory from what the store writes, pushed as Server-Sent Events on GET /status, and shown by an M5StickC Plus2 with the agent's face. Off unless AGENT_STATUS_PORT and AGENT_STATUS_TOKEN are both set. Implemented in src/status.ts and devices/m5stick. No polling: the server pushes, the device listens.</div>
+
+<div style="position: absolute; left: 64px; top: 250px; width: 380px; height: 240px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">The activity</b> <span style="color: #5E5E58">· src/store.ts</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">store.activity: an EventEmitter
+every event the store writes (the events
+  table), told as it is written
++ two moments it does not write, told by
+  the core:
+  thinking    a model starts (reply, gate)
+  tool_start  a tool starts (its name)
+{ kind, thread_key, author_kind, ref,
+  payload }; nothing more is stored</span></span></div>
+<div style="position: absolute; left: 540px; top: 180px; width: 560px; height: 380px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 10px"><span><b style="font-size: 15px">StatusFeed</b> <span style="color: #5E5E58">· src/status.ts · fold(activity) → one Status</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">received                   → received  (system row: "event")
+thinking                   → thinking  (the gate: "triage")
+tool_start                 → tool      (the tool's name)
+delivering                 → writing
+replied · silent · drafted · ignored · intercepted
+· capped · failed · delivered · delivery_failed
+· dead                     → ground
+task_started               → + the task, ground
+task_waiting · task_failed · task_done
+· task_abandoned           → − the task, ground
+
+ground = coding (the repository's name) while a code
+  task runs, else idle; at start: the tasks running
+a moment with nothing after it (a run cut short, a
+  silent triage): back to ground after 2 min
+same state, detail and tasks as before: nothing told</span></span></div>
+<div style="position: absolute; left: 1196px; top: 230px; width: 520px; height: 280px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">GET /status</b> <span style="color: #5E5E58">· statusServer() · Server-Sent Events</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">AGENT_STATUS_PORT + AGENT_STATUS_TOKEN: both, or no server
+Authorization: Bearer &lt;token&gt;, compared in constant time
+  (else 401; any other path or method: 404)
+
+event: status
+data: {"state":"tool","detail":"notion-search",
+       "tasks":0,"at":"2026-11-15T13:52:07.412Z"}
+
+one event at once, then one at each change
+": beat" every 25 s: a proxy keeps an idle stream open
+SIGTERM: the streams are ended with the rest</span></span></div>
+<div style="position: absolute; left: 1812px; top: 220px; width: 684px; height: 300px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #B85C1E; border-radius: 10px"><span><b style="font-size: 15px">M5StickC Plus2</b> <span style="color: #5E5E58">· devices/m5stick · Arduino, M5Unified</span><br>The agent's face, drawn from its profile picture (26 × 26 cells of 5 px), in landscape (240 × 135), beside a panel that says what it is doing.<br>• streams GET /status and redraws at once (certs.h: the roots behind Cloudflare's certificates)<br>• each moment stays at least 1.5 s on screen; the latest one wins<br>• offline (no Wi-Fi or no stream): the face turns grey; it reconnects alone, waiting longer each time (2 s to 1 min)<br>• button A or B: brightness, kept across restarts; no sound<br>• Wi-Fi, STATUS_URL and STATUS_TOKEN in secrets.h, never committed</span></div>
+
+<div style="position: absolute; left: 446px; top: 346px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">every event</div>
+<div style="position: absolute; left: 1102px; top: 346px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">Status</div>
+<div style="position: absolute; left: 1718px; top: 338px; width: 92px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">through a tunnel<br>(Cloudflare)</div>
+
+<div style="position: absolute; left: 64px; top: 610px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #2457C5">THE SIX STATES · STATE, DETAIL, WHAT THE SCREEN SHOWS</div>
+<div style="position: absolute; left: 64px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #1F1F1C">idle</b> <span style="color: #5E5E58">· ground state</span><br>no moment going on, no code task running<br><span style="color: #5E5E58">face: blinks now and then; after 10 min, eyes closed, a "z", the screen dimmed<br>panel: au repos / dodo</span></span></div>
+<div style="position: absolute; left: 470px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #2457C5">received</b> <span style="color: #5E5E58">· a moment</span><br>a row enters the inbox; detail "event" for a system row (a reminder, a deployment)<br><span style="color: #5E5E58">face: wide eyes, the hat's lights flash, a "!"<br>panel: message !</span></span></div>
+<div style="position: absolute; left: 876px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #2457C5">thinking</b> <span style="color: #5E5E58">· a moment</span><br>a model call starts; detail "triage" when it is the gate<br><span style="color: #5E5E58">face: looks up, a light runs along the hat, thought bubbles<br>panel: il cogite (il lit: triage)</span></span></div>
+<div style="position: absolute; left: 1282px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #2457C5">tool</b> <span style="color: #5E5E58">· a moment</span><br>a tool starts; detail: its name (memory_read, notion-search…)<br><span style="color: #5E5E58">face: looks left and right; an icon per tool family (Notion, memory, search, reminder…)<br>panel: Notion / outil + the tool</span></span></div>
+<div style="position: absolute; left: 1688px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #2457C5">writing</b> <span style="color: #5E5E58">· a moment</span><br>a post is being delivered (the delivering event)<br><span style="color: #5E5E58">face: the mouth moves<br>panel: il ecrit...</span></span></div>
+<div style="position: absolute; left: 2094px; top: 644px; width: 382px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #1F1F1C">coding</b> <span style="color: #5E5E58">· ground state</span><br>a code task is running; detail: the repository's name; tasks: how many<br><span style="color: #5E5E58">face: eyes scan, lights cross on the hat<br>panel: il code + the repository</span></span></div>
+
+<div style="position: absolute; left: 64px; top: 890px; width: 760px; height: 264px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">What it tells, and what it does not</b><br>• the detail is a tool's name or a repository's name, never what a message says, who wrote it or where<br>• nothing is stored: the status is folded in memory; a restart starts again from the tasks still running<br>• no polling on either side: the store tells each event as it writes it, the server pushes, the device listens<br>• one bearer token, no account; meant to be reached through a tunnel (Cloudflare), by the device<br>• the web view (debug.ts) is something else: the tables and the trace, behind a password</span></div>
+<div style="position: absolute; left: 848px; top: 890px; width: 800px; height: 264px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">One mention, as the screen sees it</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">the store or the core tells                   the status becomes
+received (the inbox row)                      received
+thinking { model: "gate" }                    thinking · triage
+thinking (the reply's model)                  thinking
+tool_start { tool: "search_conversations" }   tool · search_conversations
+tool_start { tool: "notion-search" }          tool · notion-search
+drafted (the reply, into the outbox)          idle, or coding · agent-core while a task runs
+delivering                                    writing
+delivered                                     idle, or coding · agent-core</span></span></div>
+<div style="position: absolute; left: 1672px; top: 890px; width: 824px; height: 264px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 10px"><span><b style="font-size: 15px">Build, flash, test</b> <span style="color: #5E5E58">· devices/m5stick/README.md</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">cp secrets.example.h secrets.h   # Wi-Fi, STATUS_URL, STATUS_TOKEN
+python3 certs.py                 # certs.h, from the system bundle
+arduino-cli lib install M5Unified@0.3.0
+arduino-cli compile --fqbn esp32:esp32:m5stack_stickc_plus2 --output-dir build .
+arduino-cli upload --fqbn esp32:esp32:m5stack_stickc_plus2 \
+  -p /dev/cu.usbserial-* --input-dir build .
+
+without secrets.h: on USB only. A line on the serial port (115200) sets
+the state: "tool notion-search", "coding agent-core"; "shot" sends the
+screen back as raw RGB565</span></span></div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2560,"height":1218}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
