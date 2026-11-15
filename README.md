@@ -61,7 +61,7 @@ DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN
 `AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
 memory's `common/`, not only the owner's; the persona is never in it), `AGENT_PRIVACY` (`off`: every
 conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
-`CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
+`CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_TASK_MODEL` (code tasks, default `opus`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
 `{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no web view: the tables read-only, the
 prompts and the memory read and edited; basic auth with user `debug`; it shows private conversations and changes what the
 agent is told), `AGENT_SHELVES` (JSON, name → folder: read-only
@@ -168,13 +168,17 @@ Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
   starts over from the remote's default branch as it is now.
 - `<in_progress>` in every prompt: open tasks and those done within 7 days, upcoming reminders, and for the owner
   what waits for him.
-- The Claude Code runner: the token stays in this process, in a vault (a bare repository per task, outside the
-  workspace, which the session can neither read nor write). The copy is cloned from the vault and never trusted:
-  pushing fetches the task's branch from the copy into the vault (no hook, no fsmonitor) and pushes from there to the
-  remote named by code; the token goes through that command's environment, never its arguments. Commits someone else
-  pushed to the branch reach the session as a bundle to merge. The session gets file tools inside its copy except
-  `.git` (any case, symlinks followed), a sandboxed terminal that cannot read the agent's folder or home, and
-  `progress`, `push_branch`, `open_pr`; everything else is refused.
+- The Claude Code runner: each task's session runs whole in steve-apercu's workshop (a rootless container per copy,
+  only the copy mounted, egress through a proxy limited to package registries, GitHub and Anthropic's API), headless
+  (`claude -p`, stream-json), on `CLAUDE_TASK_MODEL` (default `opus`), with the repository's own settings (CLAUDE.md,
+  skills, hooks, agents) but none of its MCP servers and no web tools. It commits, pushes the task's branch and opens
+  the PR itself, following the repository's procedure, with `gh` and the GitHub token of the repository's owner
+  (`GITHUB_TOKEN_<OWNER>`, else `GITHUB_TOKEN`), fine-grained: limited to the task repositories. Its input (prompt,
+  system prompt, schema) and its tokens reach it through the session's environment only, never through files this
+  process would write into the copy. Its news is its todo list's item in progress; its end, a structured report; the
+  PR it opened is found by its branch afterwards. This process clones the copy from its vault (a bare repository per
+  task) and never runs git in a copy a session has had (it only fetches the branch out of it, no hook, no fsmonitor).
+  Stopping a task closes its workshop, which stops the session.
 
 After two reviews: the catch-up cursor is stored and moves only when a pass completes; a reconnection during a pass
 runs another one after it; a failed pass is tried again on the one timer, five times at most, then an alert; a

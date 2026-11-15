@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileUseAllowed, insideCopy, prepareCopy, pushBranch } from "../src/runners/claude-code.ts";
+import { prepareCopy } from "../src/runners/claude-code.ts";
 import type { TaskRun, TaskRunner } from "../src/tasks.ts";
 import type { Brain, Scope, ToolContext } from "../src/types.ts";
 import { echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
@@ -192,7 +192,7 @@ test("code task: abandoned by its requester, the owner or its conversation; its 
   core.kill();
 });
 
-test("runner: the copy is cloned on the task's branch; only that branch is pushed, and nothing in the copy runs or redirects it", async () => {
+test("runner: the copy is cloned on the task's branch, without a token; nothing in the copy runs here", async () => {
   const root = mkdtempSync(join(tmpdir(), "agent-git-"));
   const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString().trim();
   const bare = join(root, "origin.git");
@@ -208,49 +208,25 @@ test("runner: the copy is cloned on the task's branch; only that branch is pushe
   const vault = join(root, "vault", "task-1.git");
   await prepareCopy(copy, vault, bare, "agent/1-x", "token");
   assert.equal(run(copy, "rev-parse", "--abbrev-ref", "HEAD"), "agent/1-x");
-  assert.notEqual(run(copy, "remote", "get-url", "origin"), bare, "the copy has no link to the remote");
+  assert.throws(() => run(copy, "config", "--get", "http.extraheader"), "the token is never written");
   writeFileSync(join(copy, "feature.txt"), "x\n");
   run(copy, "add", ".");
   run(copy, "commit", "--quiet", "-m", "feature");
 
-  // A hostile copy: a hook that would run on push, an origin pointing elsewhere.
+  // A hostile copy: hooks and an fsmonitor that would run if this process ran git there.
   const marker = join(root, "hook-ran");
-  writeFileSync(join(copy, ".git", "hooks", "pre-push"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+  writeFileSync(join(copy, ".git", "hooks", "post-checkout"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
   writeFileSync(join(copy, ".git", "hooks", "upload-pack"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
-  const elsewhere = join(root, "elsewhere.git");
-  run(root, "init", "--quiet", "--bare", elsewhere);
-  run(copy, "remote", "set-url", "origin", elsewhere);
   run(copy, "config", "core.fsmonitor", `touch ${marker}`);
-
-  await pushBranch(copy, vault, bare, "agent/1-x", "token");
-  assert.match(run(bare, "branch", "--list"), /agent\/1-x/);
-  assert.equal(run(elsewhere, "branch", "--list"), "");
+  await prepareCopy(copy, vault, bare, "agent/1-x", "token");
+  assert.match(run(vault, "log", "--oneline", "-1", "agent/1-x"), /feature/, "the vault follows the copy's branch");
   assert.equal(existsSync(marker), false, "no code of the copy ran");
-  assert.throws(() => run(copy, "config", "--get", "http.extraheader"), "the token is never written");
 
-  // A copy made again (a wiped workspace) starts from the pushed branch.
+  // The session pushed (its origin set to the remote, in its container); a copy made again starts from that branch.
+  run(copy, "-c", "core.fsmonitor=false", "push", "--quiet", bare, "agent/1-x");
   const again = join(root, "task-1-again");
   await prepareCopy(again, join(root, "vault", "again.git"), bare, "agent/1-x", "token");
   assert.match(run(again, "log", "--oneline", "-1"), /feature/);
-
-  // Someone commits on the PR branch: the next run hands the session a bundle to merge, and the push goes through.
-  const reviewer = join(root, "reviewer");
-  run(root, "clone", "--quiet", "--branch", "agent/1-x", bare, reviewer);
-  writeFileSync(join(reviewer, "suggestion.txt"), "y\n");
-  run(reviewer, "add", ".");
-  run(reviewer, "commit", "--quiet", "-m", "suggestion");
-  run(reviewer, "push", "--quiet", "origin", "agent/1-x");
-  const { upstream } = await prepareCopy(copy, vault, bare, "agent/1-x", "token");
-  assert.ok(upstream && existsSync(upstream));
-  run(copy, "remote", "set-url", "origin", vault);
-  run(copy, "fetch", "--quiet", upstream, "refs/upstream/agent/1-x");
-  run(copy, "merge", "--quiet", "--no-edit", "FETCH_HEAD");
-  writeFileSync(join(copy, "more.txt"), "z\n");
-  run(copy, "add", ".");
-  run(copy, "commit", "--quiet", "-m", "more");
-  await pushBranch(copy, vault, bare, "agent/1-x", "token");
-  assert.match(run(bare, "log", "--oneline", "agent/1-x"), /suggestion/);
-  assert.equal((await prepareCopy(copy, vault, bare, "agent/1-x", "token")).upstream, undefined);
 });
 
 test("runner: a branch without commits of its own restarts from the remote's main as it is now; one with commits stays", async () => {
@@ -296,23 +272,4 @@ test("runner: a branch without commits of its own restarts from the remote's mai
   commit("newest");
   await prepareCopy(other, otherVault, bare, "agent/2-y", "token");
   assert.equal(existsSync(join(other, "wip.txt")), true);
-});
-
-test("runner: file tools stay in the copy and out of its .git, whatever the case or a symlink", () => {
-  const dir = mkdtempSync(join(tmpdir(), "agent-copy-"));
-  mkdirSync(join(dir, ".git"));
-  mkdirSync(join(dir, "src"));
-  symlinkSync(join(dir, ".git"), join(dir, "src", "sneaky"));
-  assert.equal(insideCopy(dir, "src/index.ts"), true);
-  assert.equal(insideCopy(dir, "new/file.ts"), true);
-  assert.equal(insideCopy(dir, ".git/config"), false);
-  assert.equal(insideCopy(dir, ".GIT/config"), false);
-  assert.equal(insideCopy(dir, "src/sneaky/config"), false);
-  assert.equal(insideCopy(dir, "../elsewhere"), false);
-  // A glob pattern is a path too.
-  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "src/**/*.ts" }), true);
-  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "/Users/*/.ssh/*" }), false);
-  assert.equal(fileUseAllowed(dir, "Glob", { pattern: "../../**/*.env", path: "src" }), false);
-  assert.equal(fileUseAllowed(dir, "Grep", { pattern: "..", glob: "**/*.ts" }), true, "Grep's pattern is a regex, not a path");
-  assert.equal(fileUseAllowed(dir, "Grep", { pattern: "token", glob: "../**" }), false);
 });

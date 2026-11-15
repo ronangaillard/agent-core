@@ -13,7 +13,7 @@ import { Memory } from "./memory.ts";
 import { DEFAULT_PROMPTS, Prompts } from "./prompts.ts";
 import { ownerCommands } from "./owner.ts";
 import { githubSource } from "./sources/github.ts";
-import { apercuTerminal } from "./runners/apercu.ts";
+import { apercuWorkshop } from "./runners/apercu.ts";
 import { claudeCodeRunner, tokensFromEnv } from "./runners/claude-code.ts";
 import { Store } from "./store.ts";
 import type { Mode, Rule } from "./types.ts";
@@ -60,13 +60,16 @@ const email =
       })
     : undefined;
 
-/** Code tasks: off unless a GitHub token and the repositories are set. GITHUB_TOKEN_<OWNER>: another owner's token. */
+/**
+ * Code tasks: off unless a GitHub token, the repositories and steve-apercu's workshop are set. Each task's Claude Code
+ * session runs whole in the workshop (a container per copy), with the token of its repository's owner
+ * (GITHUB_TOKEN_<OWNER>, else GITHUB_TOKEN): fine-grained, limited to the task repositories.
+ */
 const repos = (process.env.AGENT_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean);
-/** Their terminal in steve-apercu's workshop (a container per copy) instead of Claude Code's sandbox, when both are set. */
-const terminal =
-  process.env.STEVE_APERCU_URL && process.env.STEVE_APERCU_TOKEN ? apercuTerminal({ url: process.env.STEVE_APERCU_URL, token: process.env.STEVE_APERCU_TOKEN }) : undefined;
+const workshop =
+  process.env.STEVE_APERCU_URL && process.env.STEVE_APERCU_TOKEN ? apercuWorkshop({ url: process.env.STEVE_APERCU_URL, token: process.env.STEVE_APERCU_TOKEN }) : undefined;
 const runner =
-  process.env.GITHUB_TOKEN && repos.length
+  process.env.GITHUB_TOKEN && repos.length && workshop
     ? claudeCodeRunner({
         workspace: process.env.AGENT_WORKSPACE ?? "data/workspace",
         githubToken: process.env.GITHUB_TOKEN,
@@ -74,9 +77,9 @@ const runner =
         persona,
         prompts,
         name: process.env.AGENT_NAME ?? "Agent",
-        ...(process.env.CLAUDE_MODEL ? { model: process.env.CLAUDE_MODEL } : {}),
-        ...executable,
-        ...(terminal ? { terminal } : {}),
+        // Code tasks think harder than replies: opus unless CLAUDE_TASK_MODEL says otherwise.
+        model: process.env.CLAUDE_TASK_MODEL ?? "opus",
+        workshop,
       })
     : undefined;
 
