@@ -18,7 +18,7 @@ and it reconnects alone, waiting longer each time (2 s to 1 min). No sound. Butt
 ## Build and flash
 
 ```bash
-cp secrets.example.h secrets.h   # Wi-Fi, STATUS_URL, STATUS_TOKEN (never committed)
+cp secrets.example.h secrets.h   # Wi-Fi (one or two networks), STATUS_URL, STATUS_TOKEN (never committed)
 python3 certs.py                 # certs.h: the roots behind Cloudflare's certificates, from the system bundle
 arduino-cli lib install M5Unified@0.3.0
 arduino-cli compile --fqbn esp32:esp32:m5stack_stickc_plus2 --output-dir build .

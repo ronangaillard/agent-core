@@ -5,6 +5,7 @@
 #include <M5Unified.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <WiFiClientSecure.h>
 
 #include "certs.h"
@@ -16,6 +17,11 @@
 #define WIFI_PASSWORD ""
 #define STATUS_URL ""
 #define STATUS_TOKEN ""
+#endif
+// A second network, optional (e.g. home and office): the strongest one in reach is joined.
+#ifndef WIFI_SSID_2
+#define WIFI_SSID_2 ""
+#define WIFI_PASSWORD_2 ""
 #endif
 
 // --- palette (the profile picture's) and layout ------------------------------------------------------------------
@@ -149,10 +155,13 @@ void stream() {
 void network(void*) {
   if (strlen(WIFI_SSID) == 0 || strlen(STATUS_URL) == 0) vTaskDelete(nullptr);  // serial only
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFiMulti networks;
+  networks.addAP(WIFI_SSID, WIFI_PASSWORD);
+  if (strlen(WIFI_SSID_2) > 0) networks.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
   uint32_t pause = 2000;
   for (;;) {
-    hasWifi = WiFi.status() == WL_CONNECTED;
+    // Joins (or rejoins) the strongest known network in reach.
+    hasWifi = networks.run(10000) == WL_CONNECTED;
     if (!hasWifi) {
       online = false;
       vTaskDelay(pdMS_TO_TICKS(1000));
