@@ -258,7 +258,7 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     return pulls[0]?.number;
   }
 
-  return async (run: TaskRun): Promise<TaskOutcome> => {
+  const runner: TaskRunner = async (run: TaskRun): Promise<TaskOutcome> => {
     const { task } = run;
     const dir = join(workspace, `task-${task.id}`);
     const vault = join(vaults, `task-${task.id}.git`);
@@ -321,4 +321,9 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
       if (workshop) await workshop.close().catch((error: unknown) => console.error("workshop not closed", error));
     }
   };
+  // A finished task's copy and its bare repository: its branch is on the remote (or was merged), nothing is lost.
+  runner.forget = (taskId) => {
+    for (const path of [join(workspace, `task-${taskId}`), join(vaults, `task-${taskId}.git`)]) rmSync(path, { recursive: true, force: true });
+  };
+  return runner;
 }

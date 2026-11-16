@@ -23,8 +23,11 @@ export type TaskRun = {
 /** The task's final word: posted in its conversation. waiting: a PR is open; done: nothing left to do. */
 export type TaskOutcome = { report: string; status: "waiting" | "done" };
 
-/** Does the work: a copy, a branch, a session with a terminal. Throws when it cannot. */
-export type TaskRunner = (run: TaskRun) => Promise<TaskOutcome>;
+/**
+ * Does the work: a copy, a branch, a session with a terminal. Throws when it cannot. forget: what it keeps on disk
+ * for a task (its copy…) goes, once the task is done or abandoned for good.
+ */
+export type TaskRunner = ((run: TaskRun) => Promise<TaskOutcome>) & { forget?(taskId: number): void | Promise<void> };
 
 /** The same rule as the digest. */
 export const taskVisible = (task: TaskRecord, scope: Scope, privacy: Privacy) => mayRecall({ private: task.private, author: task.requester }, scope, privacy);

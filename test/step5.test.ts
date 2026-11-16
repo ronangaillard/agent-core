@@ -278,3 +278,28 @@ test("runner: a branch without commits of its own restarts from the remote's mai
   await prepareCopy(other, otherVault, bare, "agent/2-y", "token");
   assert.equal(existsSync(join(other, "wip.txt")), true);
 });
+
+test("code task: once done or abandoned, the runner forgets it (its copy goes), after its run; waiting keeps it", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const forgotten: number[] = [];
+  const outcomes: ("waiting" | "done")[] = ["done", "waiting", "waiting"];
+  const runner: TaskRunner = Object.assign(async (run: TaskRun) => {
+    if (outcomes[run.task.id - 1] === "waiting") run.setPr(80 + run.task.id);
+    return { report: `report ${run.task.id}`, status: outcomes[run.task.id - 1]! };
+  }, { forget: (id: number) => void forgotten.push(id) });
+  const { brain } = echoBrain();
+  const core = makeCore(freshDb(), connector, brain, tasks, { runner });
+  await core.start();
+  await core.startTask(context(paul, "a"), { request: "one", title: "done", fresh: true });
+  await core.startTask(context(paul, "b"), { request: "two", title: "merged", fresh: true });
+  await core.startTask(context(paul, "c"), { request: "three", title: "dropped", fresh: true });
+  await waitFor(() => core.store.task(3)?.status === "waiting");
+  await waitFor(() => forgotten.length === 1);
+  assert.deepEqual(forgotten, [1], "done forgets; waiting keeps its copy");
+  core.pullRequestClosed("acme/api", 82, true);
+  assert.match(await core.abandonTask(context(paul, "c"), {}), /abandoned/);
+  await waitFor(() => forgotten.length === 3);
+  assert.deepEqual(forgotten, [1, 2, 3]);
+  core.kill();
+});

@@ -690,6 +690,7 @@ export class Core {
     this.runs.get(task.id)?.abort();
     this.runs.delete(task.id);
     this.store.updateTask(task.id, { status: "abandoned" }, `Task #${task.id} abandoned.`);
+    this.forget(task.id);
     return `Task #${task.id} abandoned${task.pr ? ` (PR #${task.pr} stays open on GitHub)` : ""}.`;
   }
 
@@ -711,7 +712,19 @@ export class Core {
    * merged knows); asking again still continues it. A running task is left to its run.
    */
   pullRequestClosed(repo: string, pr: number, merged: boolean) {
-    for (const task of this.store.tasksOfPr(repo, pr)) this.store.updateTask(task.id, { status: merged ? "done" : "abandoned" });
+    for (const task of this.store.tasksOfPr(repo, pr)) {
+      this.store.updateTask(task.id, { status: merged ? "done" : "abandoned" });
+      this.forget(task.id);
+    }
+  }
+
+  /** A task over for good: what the runner keeps for it goes, after any run of it (tasks run one at a time, queued). */
+  private forget(taskId: number) {
+    const runner = this.options.runner;
+    if (!runner?.forget) return;
+    this.taskQueue = this.taskQueue
+      .then(() => runner.forget!(taskId))
+      .catch((error: unknown) => console.error(`task #${taskId}: its copy not removed`, error));
   }
 
   /** One task runs at a time; a replaced or stopped run writes nothing more. */
@@ -739,6 +752,7 @@ export class Core {
         });
         if (over()) return;
         this.store.updateTask(task.id, { status: outcome.status }, outcome.report);
+        if (outcome.status === "done") this.forget(task.id);
       } catch (error) {
         if (over()) return;
         const message = error instanceof Error ? error.message : String(error);

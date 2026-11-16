@@ -170,6 +170,8 @@ Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
   continuation are the lesser of the task's and the requester's. One task runs at a time; a replaced run says
   nothing. With several repositories, a new task must name one (`repo`); with one, it is the default.
 - `abandon_code_task`: stops a task for good (same rights as changing it); its run is cut, its copy and branch stay.
+- A task with an open PR is `waiting`; GitHub's `pull_request` event (and a check at start) makes it `done` when
+  merged, `abandoned` when closed. Once `done` or `abandoned`, its copy and its bare repository are removed.
 - Only the end goes to the task's conversation (an outbox `report` row): nothing on the way, the step it is at is in
   `<in_progress>` for whoever asks; a failure
   is a one-line report and an alert, and the task is `failed`: still open, asking again resumes it. A task a restart
