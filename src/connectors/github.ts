@@ -18,6 +18,8 @@ export type GithubOptions = {
   workflows?: string[];
   /** Default: api.github.com. */
   api?: string;
+  /** A pull request closed (merged or not): its task, if any, is settled by the core. Not a message for the agent. */
+  onPullRequestClosed?: (repo: string, pr: number, merged: boolean) => void;
 };
 
 type Deployment = { id: number; ref?: string; sha?: string; environment?: string; creator?: { login?: string } };
@@ -61,7 +63,11 @@ export function signatureOk(body: string, signature: string | undefined, secret:
  * never free text written by others:
  * the agent reads the rest itself (GitHub's MCP server). Rows are private: they never come up elsewhere.
  */
-export function githubConnector(options: GithubOptions): Connector & { handle(event: string | undefined, signature: string | undefined, body: string): number } {
+export function githubConnector(options: GithubOptions): Connector & {
+  handle(event: string | undefined, signature: string | undefined, body: string): number;
+  /** A pull request's state now, for the tasks still waiting on one at start (a close missed while down). */
+  pullRequest(repo: string, pr: number): Promise<{ closed: boolean; merged: boolean }>;
+} {
   let server: Server | undefined;
   let sink: ((raw: unknown) => void) | undefined;
   const watched = new Set(options.workflows ?? []);
@@ -146,6 +152,12 @@ export function githubConnector(options: GithubOptions): Connector & { handle(ev
       if (payload.action === "completed") sink?.({ repo: payload.repository.full_name, kind: "run", defaultBranch: payload.repository.default_branch, run: payload.workflow_run } satisfies Raw);
       return 202;
     }
+    if (event === "pull_request") {
+      const payload = JSON.parse(body) as { action?: string; repository?: { full_name?: string }; pull_request?: { number?: number; merged?: boolean } };
+      if (!payload.repository?.full_name || !payload.pull_request?.number) return 400;
+      if (payload.action === "closed") options.onPullRequestClosed?.(payload.repository.full_name, payload.pull_request.number, Boolean(payload.pull_request.merged));
+      return 202;
+    }
     if (event !== "deployment_status") return 204;
     const payload = JSON.parse(body) as { repository?: { full_name?: string }; deployment?: Deployment; deployment_status?: Status };
     if (!payload.deployment || !payload.deployment_status || !payload.repository?.full_name) return 400;
@@ -156,6 +168,11 @@ export function githubConnector(options: GithubOptions): Connector & { handle(ev
   return {
     id: "github",
     handle,
+
+    async pullRequest(repo, pr) {
+      const found = await api<{ state?: string; merged?: boolean }>(`/repos/${repo}/pulls/${pr}`);
+      return { closed: found.state === "closed", merged: Boolean(found.merged) };
+    },
 
     async start(receive) {
       sink = receive;

@@ -95,6 +95,7 @@ const github = process.env.GITHUB_WEBHOOK_SECRET
       ...(process.env.GITHUB_TOKEN ? { token: process.env.GITHUB_TOKEN } : {}),
       repos: (process.env.GITHUB_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean),
       workflows: (process.env.GITHUB_WORKFLOWS ?? "").split(",").map((w) => w.trim()).filter(Boolean),
+      onPullRequestClosed: (repo, pr, merged) => core.pullRequestClosed(repo, pr, merged),
     })
   : undefined;
 
@@ -166,5 +167,17 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 }
 
 await core.start();
+// The tasks still waiting on a pull request: closed while down, they are settled now (once, at start).
+if (github && process.env.GITHUB_TOKEN) {
+  for (const task of core.store.tasksWith("waiting")) {
+    if (!task.pr) continue;
+    try {
+      const state = await github.pullRequest(task.repo, task.pr);
+      if (state.closed) core.pullRequestClosed(task.repo, task.pr, state.merged);
+    } catch (error) {
+      console.error(`github: PR #${task.pr} of task #${task.id} not read`, error);
+    }
+  }
+}
 await debug?.start();
 console.log("agent-core started");

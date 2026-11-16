@@ -706,6 +706,14 @@ export class Core {
     }
   }
 
+  /**
+   * A task's pull request closed: merged, the task is done; closed unmerged, abandoned. Nothing is posted (whoever
+   * merged knows); asking again still continues it. A running task is left to its run.
+   */
+  pullRequestClosed(repo: string, pr: number, merged: boolean) {
+    for (const task of this.store.tasksOfPr(repo, pr)) this.store.updateTask(task.id, { status: merged ? "done" : "abandoned" });
+  }
+
   /** One task runs at a time; a replaced or stopped run writes nothing more. */
   private launch(task: TaskRecord, request: string, resumed: boolean, from: Address | undefined) {
     const runner = this.options.runner;

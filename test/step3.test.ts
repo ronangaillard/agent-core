@@ -390,3 +390,38 @@ test("open_file: an image is shown to the model, a text file read, a binary refu
   await assert.rejects(core.openFile(context(colleague), "file:F9"), /not found/);
   core.kill();
 });
+
+test("github: a task's pull request closed settles it (merged: done, unmerged: abandoned), nothing posted, nothing for the agent", async () => {
+  const { brain, prompts } = echoBrain();
+  const world = new World();
+  const chat = new FakeConnector(world);
+  let core!: Core;
+  const github = githubConnector({ secret: "s3cret", port: 0, onPullRequestClosed: (repo, pr, merged) => core.pullRequestClosed(repo, pr, merged) });
+  core = new Core({ db: openDb(freshDb()), connectors: [chat, github], brain, config });
+  await core.start();
+  const task = (pr: number) => {
+    const t = core.store.createTask({ connector: "fake", address: { connector: "fake", conversation: "a", thread: "main" }, thread_key: "fake:a", title: `t${pr}`, repo: "acme/app", request: "x", requester: "ronan", owner_asked: true, private: true });
+    core.store.updateTask(t.id, { status: "waiting", pr });
+    return t.id;
+  };
+  const merged = task(10);
+  const closed = task(11);
+  const other = task(12);
+  const sign = (body: string) => `sha256=${createHmac("sha256", "s3cret").update(body).digest("hex")}`;
+  const send = (pr: number, isMerged: boolean, action = "closed", repo = "acme/app") => {
+    const body = JSON.stringify({ action, repository: { full_name: repo }, pull_request: { number: pr, merged: isMerged } });
+    return github.handle("pull_request", sign(body), body);
+  };
+  assert.equal(send(10, true), 202);
+  send(11, false);
+  send(12, false, "opened");
+  send(12, true, "closed", "acme/other");
+  assert.equal(core.store.task(merged)!.status, "done");
+  assert.equal(core.store.task(closed)!.status, "abandoned");
+  assert.equal(core.store.task(other)!.status, "waiting", "another action, or another repository's PR, changes nothing");
+  assert.equal(github.handle("pull_request", "sha256=bad", "{}"), 401);
+  assert.equal(prompts.length, 0, "not a message for the agent");
+  assert.equal(chat.sent.length, 0, "nothing posted");
+  core.kill();
+  await github.stop?.();
+});

@@ -282,6 +282,11 @@ export class Store {
     });
   }
 
+  /** The open tasks whose pull request this is. */
+  tasksOfPr(repo: string, pr: number): TaskRecord[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE repo = ? AND pr = ? AND status IN ('waiting', 'failed') ORDER BY id").all(repo, pr) as Row[]).map(taskOf);
+  }
+
   task(id: number): TaskRecord | undefined {
     const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
     return row ? taskOf(row) : undefined;
