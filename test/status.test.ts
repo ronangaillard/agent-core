@@ -22,7 +22,11 @@ test("status: the activity folds into one state, a moment falls back to idle, a 
   emit("received", undefined);
   emit("silent");
   emit("task_waiting", undefined, 7);
-  assert.deepEqual(seen, ["idle", "received", "thinking", "tool:notion-search", "idle", "writing", "idle", "coding:still-maestro", "received", "coding:still-maestro", "idle"]);
+  assert.deepEqual(seen, ["idle", "received:slack", "thinking", "tool:notion-search", "idle", "writing", "idle", "coding:still-maestro", "received:slack", "coding:still-maestro", "idle"]);
+  store.activity.emit("event", { kind: "received", thread_key: "email:abc", author_kind: "human" });
+  assert.equal(feed.now().detail, "email");
+  store.activity.emit("event", { kind: "received", thread_key: "github:acme/app:main", author_kind: "system" });
+  assert.equal(feed.now().detail, "github:event", "an event, and where from");
   assert.equal(feed.now().tasks, 0);
 });
 

@@ -63,8 +63,11 @@ export class StatusFeed {
       return this.set("ground");
     }
     switch (a.kind) {
-      case "received":
-        return this.set("received", a.author_kind === "system" ? "event" : undefined);
+      // Where it comes from: the connector (the thread key's prefix), and whether it is an event rather than a person.
+      case "received": {
+        const from = a.thread_key?.split(":")[0] || "?";
+        return this.set("received", a.author_kind === "system" ? `${from}:event` : from);
+      }
       case "thinking":
         return this.set("thinking", payload.model === "gate" ? "triage" : undefined);
       case "tool_start":
