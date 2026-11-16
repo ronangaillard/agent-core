@@ -144,7 +144,7 @@ test("code task: progress notes are capped, a failure is reported, and <in_progr
   await core.startTask(context(paul, "a"), { request: "fix", title: "fix login", fresh: false });
   await core.startTask(context({ ...paul, private: true }, "paul-dm"), { request: "secret", title: "secret job", fresh: false });
   await waitFor(() => textsIn(connector, "a").some((t) => t.includes("failed: tests are red")));
-  assert.equal(textsIn(connector, "a").filter((t) => t.startsWith("note")).length, 5);
+  assert.equal(textsIn(connector, "a").filter((t) => t.startsWith("⏳ #1 fix login: note")).length, 5, "a note names its task");
   assert.equal(core.store.task(1)!.status, "failed", "a failure is not done: the task stays open");
 
   core.ingest(world.say("what's up?", { thread: "chan", dm: false, mention: true, author: "ines", ownerOnly: false }), "fake");

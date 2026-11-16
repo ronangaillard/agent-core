@@ -730,7 +730,8 @@ export class Core {
             if (over() || notes >= 5 || Date.now() - lastNote < this.config.taskNoteGapMs) return;
             notes++;
             lastNote = Date.now();
-            this.store.updateTask(task.id, {}, text);
+            // The session's task list item, as is: alone in a thread it means nothing, so it names its task.
+            this.store.updateTask(task.id, {}, `⏳ #${task.id} ${task.title}: ${text}`);
             this.wake();
           },
           setPr: (pr) => this.store.updateTask(task.id, { pr }),
