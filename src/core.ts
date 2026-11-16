@@ -67,8 +67,6 @@ export type CoreConfig = {
   repos: string[];
   /** A task a restart cut is run again this many times at most. */
   maxTaskResumes: number;
-  /** Progress notes of a task: at most 5, this far apart. */
-  taskNoteGapMs: number;
 };
 
 export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
@@ -94,7 +92,6 @@ export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
   ownerSources: [],
   repos: [],
   maxTaskResumes: 2,
-  taskNoteGapMs: 2 * 60_000,
 };
 
 /** An owner's command: matched on the text of a row in his private scope, answered without the model. */
@@ -202,6 +199,8 @@ export class Core {
   private timer: NodeJS.Timeout | undefined;
   /** The code tasks running or queued (one runs at a time), by task id. */
   private readonly runs = new Map<number, AbortController>();
+  /** The step a running task is at (its session's task list item in progress), in memory: said only when asked. */
+  private readonly taskSteps = new Map<number, string>();
   private taskQueue: Promise<unknown> = Promise.resolve();
   private stopped = false;
   /** Tests: a simulated crash, after which nothing at all is written. */
@@ -714,8 +713,6 @@ export class Core {
     const abort = new AbortController();
     this.runs.set(task.id, abort);
     const over = () => abort.signal.aborted || this.stopped;
-    let notes = 0;
-    let lastNote = 0;
     const run = this.taskQueue.then(async () => {
       if (over()) return;
       try {
@@ -726,13 +723,9 @@ export class Core {
           conversation: thread ? thread.messages.map(asRead).join("\n") : "",
           resumed,
           signal: abort.signal,
+          // Nothing is posted along the way (only the end is): the step is kept for whoever asks where it stands.
           progress: (text) => {
-            if (over() || notes >= 5 || Date.now() - lastNote < this.config.taskNoteGapMs) return;
-            notes++;
-            lastNote = Date.now();
-            // The session's task list item, as is: alone in a thread it means nothing, so it names its task.
-            this.store.updateTask(task.id, {}, `⏳ #${task.id} ${task.title}: ${text}`);
-            this.wake();
+            if (!over()) this.taskSteps.set(task.id, text);
           },
           setPr: (pr) => this.store.updateTask(task.id, { pr }),
         });
@@ -744,7 +737,10 @@ export class Core {
         // Not done: it stays open, and asking again resumes it on its copy and branch.
         this.store.updateTask(task.id, { status: "failed" }, `Task #${task.id} failed: ${message}. Ask again to resume it.`, `Code task #${task.id} failed: ${message}`);
       } finally {
-        if (this.runs.get(task.id) === abort) this.runs.delete(task.id);
+        if (this.runs.get(task.id) === abort) {
+          this.runs.delete(task.id);
+          this.taskSteps.delete(task.id);
+        }
         if (!this.stopped) this.wake();
       }
     });
@@ -1047,7 +1043,7 @@ export class Core {
     const late = lot.some((row) => row.caught_up) ? `\n${this.prompts.text("ask-late")}` : "";
     const elsewhere = digest(this.store, last.thread_key, scope, this.privacy);
     const acted = this.store.acted(last.thread_key);
-    const going = inProgress(this.store, scope, this.privacy, last.thread_key);
+    const going = inProgress(this.store, scope, this.privacy, last.thread_key, this.taskSteps);
     const system = last.author_kind === "system";
     const ask = system
       ? this.prompts.text("ask-event", { event: last.text ?? "" })

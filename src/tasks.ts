@@ -34,16 +34,16 @@ const ago = (at: string) => {
   return minutes < 60 ? `${minutes} min ago` : minutes < 48 * 60 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
 };
 
-export const taskLine = (task: TaskRecord) =>
-  `task #${task.id} "${task.title}" · ${task.repo}${task.pr ? ` · PR #${task.pr}` : ""} · ${task.status}${task.status === "done" ? ` ${ago(task.updated_at)}` : ""} · ${task.thread_key}`;
+export const taskLine = (task: TaskRecord, step?: string) =>
+  `task #${task.id} "${task.title}" · ${task.repo}${task.pr ? ` · PR #${task.pr}` : ""} · ${task.status}${task.status === "done" ? ` ${ago(task.updated_at)}` : ""}${task.status === "running" && step ? ` (now: ${step})` : ""} · ${task.thread_key}`;
 
 /**
  * What the agent has going on, for the prompt: code tasks (open, or done within 7 days), upcoming reminders, and for
  * the owner what waits for his approval. Filtered like <elsewhere>: nothing private of someone else.
  */
-export function inProgress(store: Store, scope: Scope, privacy: Privacy, threadKey: string): string {
+export function inProgress(store: Store, scope: Scope, privacy: Privacy, threadKey: string, steps?: ReadonlyMap<number, string>): string {
   const lines: string[] = [];
-  for (const task of store.recentTasks(new Date(Date.now() - 7 * 24 * 3600_000).toISOString())) if (task.thread_key === threadKey || taskVisible(task, scope, privacy)) lines.push(`- ${taskLine(task)}`);
+  for (const task of store.recentTasks(new Date(Date.now() - 7 * 24 * 3600_000).toISOString())) if (task.thread_key === threadKey || taskVisible(task, scope, privacy)) lines.push(`- ${taskLine(task, steps?.get(task.id))}`);
   for (const reminder of store.upcomingReminders(10)) {
     if (reminder.thread_key !== threadKey && !mayRecall({ private: reminder.private, author: reminder.created_by ?? "" }, scope, privacy)) continue;
     lines.push(`- reminder #${reminder.id} at ${localTime(reminder.due_at)}: "${reminder.note}" · ${reminder.thread_key}`);

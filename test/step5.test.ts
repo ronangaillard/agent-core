@@ -20,8 +20,8 @@ const context = (scope: Scope, thread: string): ToolContext => ({
   address: { connector: "fake", conversation: thread, thread: "main" },
 });
 const textsIn = (connector: FakeConnector, thread: string) => connector.sent.filter((s) => s.address.conversation === thread).map((s) => ("text" in s.post ? s.post.text : ""));
-const tasks = { repos: ["acme/api"], taskNoteGapMs: 0 };
-const twoRepos = { repos: ["acme/api", "acme/web"], taskNoteGapMs: 0 };
+const tasks = { repos: ["acme/api"] };
+const twoRepos = { repos: ["acme/api", "acme/web"] };
 
 /** A runner the test drives: each run waits until released, unless told to finish at once. */
 function fakeRunner(auto = true) {
@@ -131,11 +131,13 @@ test("code task: a restart runs it again, twice at most, then fails it with a wo
   core.kill();
 });
 
-test("code task: progress notes are capped, a failure is reported, and <in_progress> shows what is visible", async () => {
+test("code task: nothing is posted along the way, the step is said when asked; a failure is reported; <in_progress> shows what is visible", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
+  let finish!: () => void;
   const runner: TaskRunner = async (run) => {
     for (let i = 0; i < 7; i++) run.progress(`note ${i}`);
+    await new Promise<void>((resolve) => (finish = resolve));
     throw new Error("tests are red");
   };
   const { brain, prompts } = echoBrain();
@@ -143,14 +145,17 @@ test("code task: progress notes are capped, a failure is reported, and <in_progr
   await core.start();
   await core.startTask(context(paul, "a"), { request: "fix", title: "fix login", fresh: false });
   await core.startTask(context({ ...paul, private: true }, "paul-dm"), { request: "secret", title: "secret job", fresh: false });
-  await waitFor(() => textsIn(connector, "a").some((t) => t.includes("failed: tests are red")));
-  assert.equal(textsIn(connector, "a").filter((t) => t.startsWith("⏳ #1 fix login: note")).length, 5, "a note names its task");
-  assert.equal(core.store.task(1)!.status, "failed", "a failure is not done: the task stays open");
+  await waitFor(() => Boolean(finish));
 
   core.ingest(world.say("what's up?", { thread: "chan", dm: false, mention: true, author: "ines", ownerOnly: false }), "fake");
   await waitFor(() => prompts.length === 1);
-  assert.match(prompts[0]!, /<in_progress>[\s\S]*task #1 "fix login"/);
+  assert.match(prompts[0]!, /<in_progress>[\s\S]*task #1 "fix login"[^\n]*\(now: note 6\)/);
   assert.doesNotMatch(prompts[0]!, /secret job/);
+  assert.equal(textsIn(connector, "a").filter((t) => t.includes("note")).length, 0, "no progress note posted");
+
+  finish();
+  await waitFor(() => textsIn(connector, "a").some((t) => t.includes("failed: tests are red")));
+  assert.equal(core.store.task(1)!.status, "failed", "a failure is not done: the task stays open");
   core.kill();
 });
 
