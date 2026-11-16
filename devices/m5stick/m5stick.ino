@@ -313,12 +313,11 @@ void draw(uint32_t now) {
         for (int y = 0; y < 3; y++) cell(23, y, C_BLACK);
         cell(23, 4, C_BLACK);
       }
-      title = "message !";
-      {  // detail: the connector, ":event" when it is not a person
+      {  // detail: the connector, ":event" when it is not a person. The title says where from, alone.
         bool event = sub.endsWith(":event");
         String from = event ? sub.substring(0, sub.length() - 6) : sub;
-        String name = from == "slack" ? "Slack" : from == "email" ? "mail" : from == "github" ? "GitHub" : from;
-        sub = event ? "evenement " + name : from == "email" ? "par mail" : from == "slack" ? "sur Slack" : "de " + name;
+        title = from == "slack" ? "Slack !" : from == "email" ? "Mail !" : from == "github" ? "Github !" : "message !";
+        sub = event ? "un evenement" : "";
       }
       break;
     }

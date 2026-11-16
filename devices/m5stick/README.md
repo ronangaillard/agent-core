@@ -6,7 +6,7 @@ doing. It streams `GET /status` (Server-Sent Events, see the main README) and re
 | state | face | panel |
 |---|---|---|
 | `idle` | blinks now and then; after 10 min, eyes closed, "z", screen dimmed | au repos / dodo |
-| `received` | wide eyes, the hat's lights flash, a "!" | message !, and where from (sur Slack, par mail, de GitHub, evenement GitHub) |
+| `received` | wide eyes, the hat's lights flash, a "!" | Slack !, Mail ! or Github ! (where from; "un evenement" below when it is not a person) |
 | `thinking` | looks up, a light runs along the hat, thought bubbles | cogite (lit: triage) |
 | `tool` | looks left and right; an icon per tool family (Notion, memory, search, reminder…) | Notion / outil + the tool |
 | `writing` | the mouth moves | ecrit... |
