@@ -47,6 +47,13 @@ a{color:#2457C5}a:hover{color:#1A3F91}
 <svg width="8" height="99" viewBox="0 0 8 99" preserveAspectRatio="none" style="position: absolute; left: 3162px; top: 560px; width: 8px; height: 99px; overflow: visible; fill: none; stroke: #B85C1E; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 99"></path></svg>
 <svg width="165" height="8" viewBox="0 0 165 8" preserveAspectRatio="none" style="position: absolute; left: 3001px; top: 556px; width: 165px; height: 8px; overflow: visible; fill: none; stroke: #B85C1E; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><defs><marker id="dc-arrow-head-filled-23" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#B85C1E" stroke="none" style="stroke: none; fill: #B85C1E; fill: context-stroke"/></marker></defs><path d="M 165 4 L 4 4" marker-end="url(#dc-arrow-head-filled-23)"></path></svg>
 
+<svg width="96" height="8" viewBox="0 0 96 8" preserveAspectRatio="none" style="position: absolute; left: 3000px; top: 326px; width: 96px; height: 8px; overflow: visible; fill: none; stroke: #6B6B65; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-30" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker><marker id="dc-arrow-head-filled-31" orient="auto-start-reverse" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B6B65" stroke="none" style="stroke: none; fill: #6B6B65; fill: context-stroke"/></marker></defs><path d="M 4 4 L 92 4" marker-start="url(#dc-arrow-head-filled-31)" marker-end="url(#dc-arrow-head-filled-30)"></path></svg>
+<div style="position: absolute; left: 3004px; top: 306px; width: 88px; text-align: center; font-size: 12px; line-height: 15px; color: #5E5E58">triage mode</div>
+<div style="position: absolute; left: 3096px; top: 236px; width: 420px; height: 168px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Triage gate</b> <span style="color: #5E5E58">· Haiku (CLAUDE_GATE_MODEL)</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">only in a "triage" channel, for a message
+that is not a DM, a mention or system
+reads the last 15 messages of the thread
+→ speak: kept / no: ignored (may react)
+its own slots, outside the ≤ 3 respond</span></span></div>
 <div style="position: absolute; left: 64px; top: 40px; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Diagram: a Slack message, end to end</div>
 <div style="position: absolute; left: 64px; top: 80px; width: 3000px; color: #5E5E58">Follow the numbers. Blue: reads or writes SQLite. Dashed orange: the <b>wake()</b> signal, which carries nothing. No polling.</div>
 <div style="position: absolute; left: 728px; top: 216px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #6E5F45">SLACK CONNECTOR</div>
@@ -109,7 +116,8 @@ durable before any slow processing</span></span></div>
 </span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">
 for each free thread (≤ 3 respond):
   owner commands → handled by code, end
-  filter: ignored → done, end
+  filter (mode; triage → Haiku): ignored
+    → done, end
   settle: short wait, re-armed by each
     new message; then batch frozen
 <span style="color: #1A3F91">  attempts + 1</span>
@@ -208,7 +216,7 @@ batch terminal: releases thread + wake()</span></span></div>
 
 <div style="position: absolute; left: 64px; top: 1720px; width: 2636px; height: 360px; box-sizing: border-box; padding: 24px 28px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: min-content; column-gap: 48px; row-gap: 10px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px; font-size: 14px; line-height: 20px">
 <div><b>1</b> Ronan writes "@Steve can you review the PR?" in a #tech thread.</div>
-<div><b>7</b> For each free thread: filter, wait for the burst to settle, freeze the batch, then respond().</div>
+<div><b>7</b> For each free thread: filter (in a triage channel, Haiku decides whether Steve chimes in), wait for the burst to settle, freeze the batch, then respond().</div>
 <div><b>13</b> Delivery moves the post to delivering.</div>
 <div><b>2</b> Slack pushes the event over the websocket (Socket Mode).</div>
 <div><b>8</b> respond() re-reads the thread from Slack, and from events what it has already done here.</div>
