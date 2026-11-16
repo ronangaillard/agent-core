@@ -33,6 +33,8 @@ type SlackMessage = {
   files?: { id?: string; name?: string; title?: string; mimetype?: string; preview?: string }[];
   /** Unfurls and bots' attachments. */
   attachments?: { pretext?: string; title?: string; text?: string; fallback?: string }[];
+  /** A click on a button under the agent's post (that post's ts): an answer to the agent, as good as a mention. */
+  clicked?: string;
 };
 
 /** The buttons under a post: their action ids share this prefix; a button's value is its command. */
@@ -60,20 +62,41 @@ export function withButtons(text: string, buttons: Button[]): unknown[] {
 }
 
 /**
- * A click on one of these buttons → the message it stands for (the clicker typing the command, in a direct message
- * only: a command is never read elsewhere), and the card to put in place of the one clicked (its buttons replaced by
- * what was asked). Pure: Slack's payload in, what to do out.
+ * A click on one of these buttons → the message it stands for (the clicker typing its value, in the thread of the post
+ * clicked; a command is only ever read in the owner's direct message), and the post to put in place of the one
+ * clicked: its buttons replaced by what was chosen, written in its text too, so a re-read of the thread sees the choice.
+ * Pure: Slack's payload in, what to do out.
  */
 export function clickOf(body: unknown, action: unknown): { message: SlackMessage & { type: string }; card?: { channel: string; ts: string; text: string; blocks: unknown[] } } | null {
-  const click = body as { user?: { id?: string }; channel?: { id?: string }; message?: { ts?: string; text?: string; blocks?: { type?: string }[] } };
+  const click = body as { user?: { id?: string }; channel?: { id?: string }; message?: { ts?: string; thread_ts?: string; text?: string; blocks?: { type?: string }[] } };
   const button = action as { value?: string; action_ts?: string; text?: { text?: string } };
   const channel = click.channel?.id;
-  if (!channel?.startsWith("D") || !click.user?.id || !button.value || !button.action_ts) return null;
-  const message = { type: "message", channel, channel_type: "im", user: click.user.id, text: button.value, ts: button.action_ts };
+  if (!channel || !click.user?.id || !button.value || !button.action_ts) return null;
+  const message = {
+    type: "message",
+    channel,
+    ...(channel.startsWith("D") ? { channel_type: "im" } : {}),
+    user: click.user.id,
+    text: button.value,
+    ts: button.action_ts,
+    ...(click.message?.thread_ts ? { thread_ts: click.message.thread_ts } : !channel.startsWith("D") && click.message?.ts ? { thread_ts: click.message.ts } : {}),
+    ...(click.message?.ts ? { clicked: click.message.ts } : {}),
+  };
   if (!click.message?.ts) return { message };
+  const choice = `→ ${button.text?.text ?? button.value} (<@${click.user.id}>)`;
   const kept = (click.message.blocks ?? []).filter((block) => block.type !== "actions");
-  const asked = { type: "context", elements: [{ type: "mrkdwn", text: `→ ${button.text?.text ?? button.value} (<@${click.user.id}>)` }] };
-  return { message, card: { channel, ts: click.message.ts, text: click.message.text ?? "", blocks: [...kept, asked] } };
+  const asked = { type: "context", elements: [{ type: "mrkdwn", text: choice }] };
+  return { message, card: { channel, ts: click.message.ts, text: `${click.message.text ?? ""}\n${choice}`, blocks: [...kept, asked] } };
+}
+
+/** The model's output → posts: its messages, its reaction first, its choices as buttons under the last message. */
+export function slackPosts(output: unknown): { posts: Post[]; held: boolean } {
+  const { messages, reaction, choices } = output as { messages: string[]; reaction?: string; choices?: string[] };
+  const posts = messages.filter((text) => text.trim()).map((text): Post => ({ text }));
+  const buttons = (choices ?? []).map((label) => label.trim()).filter(Boolean).map((label): Button => ({ label, command: label }));
+  const last = posts[posts.length - 1];
+  if (last && buttons.length) posts[posts.length - 1] = { ...last, buttons };
+  return { posts: reaction?.trim() ? [{ reaction: reaction.trim().replace(/^:|:$/g, "") }, ...posts] : posts, held: false };
 }
 
 /** A thread is read whole up to the message (paged), the model gets its last messages. */
@@ -352,7 +375,8 @@ export function slackConnector(options: {
       const text = event.text ?? "";
       return {
         source_id: `slack:${event.channel}:${event.ts}`,
-        address: { connector: "slack", conversation: event.channel, thread, ts: event.ts },
+        // A click is not a Slack message: what it answers stands for it (read up to there, reacted on).
+        address: { connector: "slack", conversation: event.channel, thread, ts: event.clicked ?? event.ts },
         thread_key: `slack:${event.channel}:${thread}`,
         mode_key: `slack:${event.channel}`,
         author_id: event.user ?? event.bot_id ?? "?",
@@ -360,7 +384,7 @@ export function slackConnector(options: {
         owner_only: dm && event.user === options.ownerId,
         private: dm || type === "mpim" || type === "group" || (secret.get(event.channel) ?? true),
         dm,
-        mentions_agent: Boolean(self.userId) && text.includes(`<@${self.userId}>`),
+        mentions_agent: Boolean(event.clicked) || (Boolean(self.userId) && text.includes(`<@${self.userId}>`)),
         mentions_owner: text.includes(`<@${options.ownerId}>`),
         sent_at: isoOf(event.ts),
         payload: event,
@@ -452,6 +476,11 @@ export function slackConnector(options: {
         z.object({
           messages: z.array(z.string()).describe("The messages to post, in order. Empty list: say nothing."),
           reaction: z.string().optional().describe("An emoji name (e.g. thumbsup, eyes, white_check_mark) on the last message; often instead of a reply"),
+          choices: z
+            .array(z.string())
+            .max(5)
+            .optional()
+            .describe("Buttons under your last message (short labels, at most 5) when you ask a closed question: a click is the clicker answering that label. Only when a short answer is enough."),
         }),
       prompts: {
         "slack-dm":
@@ -460,11 +489,7 @@ export function slackConnector(options: {
           "You are writing on Slack, in a thread. Be warm and human, like a friendly colleague: someone who speaks to you, greets you, welcomes you or thanks you always gets something back, a short line or at least a reaction (one emoji on the last message). Short, in the tone used. When the conversation is not about you and you have nothing to add, say nothing (empty list) or just react.",
       },
       guide: (row) => ({ prompt: row.dm ? "slack-dm" : "slack-thread" }),
-      toPosts: (output) => {
-        const { messages, reaction } = output as { messages: string[]; reaction?: string };
-        const posts = messages.filter((text) => text.trim()).map((text): Post => ({ text }));
-        return { posts: reaction?.trim() ? [{ reaction: reaction.trim().replace(/^:|:$/g, "") }, ...posts] : posts, held: false };
-      },
+      toPosts: slackPosts,
     },
 
     async deliver(address, post): Promise<DeliverResult> {
@@ -483,9 +508,9 @@ export function slackConnector(options: {
           text: post.text,
           ...(address.thread !== "main" ? { thread_ts: address.thread } : {}),
         };
-        // Buttons only in a direct message (a click is read as a command there only). Refused blocks: certainly not
-        // posted, so the text alone goes, its commands still written in it.
-        const buttons = post.buttons?.length && address.conversation.startsWith("D") ? withButtons(post.text, post.buttons) : undefined;
+        // Never in the owner's name (the bot could not update the post once clicked). Refused blocks: certainly not
+        // posted, so the text alone goes, its commands or choices still written in it.
+        const buttons = post.buttons?.length && !asOwner ? withButtons(post.text, post.buttons) : undefined;
         const sent = buttons
           ? await client.chat.postMessage({ ...message, blocks: buttons as never }).catch((error: { data?: { error?: string } }) => {
               if (error.data?.error === "invalid_blocks") return client.chat.postMessage(message);

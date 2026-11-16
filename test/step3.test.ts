@@ -346,9 +346,25 @@ test("slack: a click in a direct message is the clicker typing the command; the 
   const { clickOf } = await import("../src/connectors/slack.ts");
   const body = { user: { id: "UOWNER" }, channel: { id: "D123" }, message: { ts: "100.1", text: "Waiting for you (#3)", blocks: [{ type: "section" }, { type: "actions" }] } };
   const click = clickOf(body, { value: "send 3", action_ts: "100.5", text: { text: "Send" } })!;
-  assert.deepEqual(click.message, { type: "message", channel: "D123", channel_type: "im", user: "UOWNER", text: "send 3", ts: "100.5" });
+  assert.deepEqual(click.message, { type: "message", channel: "D123", channel_type: "im", user: "UOWNER", text: "send 3", ts: "100.5", clicked: "100.1" });
   assert.deepEqual(click.card?.blocks, [{ type: "section" }, { type: "context", elements: [{ type: "mrkdwn", text: "→ Send (<@UOWNER>)" }] }]);
-  assert.equal(clickOf({ ...body, channel: { id: "C999" } }, { value: "send 3", action_ts: "100.5" }), null, "never outside a direct message");
+  assert.equal(click.card?.text, "Waiting for you (#3)\n→ Send (<@UOWNER>)", "the choice is in the text: a re-read of the thread sees it");
+});
+
+test("slack: a click on the agent's choices in a channel is the clicker answering, in the thread of the post", async () => {
+  const { clickOf } = await import("../src/connectors/slack.ts");
+  const body = { user: { id: "UANA" }, channel: { id: "C999" }, message: { ts: "200.2", thread_ts: "200.0", text: "Today or tomorrow?", blocks: [{ type: "section" }, { type: "actions" }] } };
+  const click = clickOf(body, { value: "Tomorrow", action_ts: "200.9", text: { text: "Tomorrow" } })!;
+  assert.deepEqual(click.message, { type: "message", channel: "C999", user: "UANA", text: "Tomorrow", ts: "200.9", thread_ts: "200.0", clicked: "200.2" });
+  // A root post with buttons: its thread is itself.
+  assert.equal(clickOf({ ...body, message: { ts: "300.1" } }, { value: "Yes", action_ts: "300.5" })!.message.thread_ts, "300.1");
+});
+
+test("slack: the agent's choices become buttons under its last message, their value the label", async () => {
+  const { slackPosts } = await import("../src/connectors/slack.ts");
+  const { posts } = slackPosts({ messages: ["Got it.", "Today or tomorrow?"], choices: ["Today", " Tomorrow ", ""] });
+  assert.deepEqual(posts, [{ text: "Got it." }, { text: "Today or tomorrow?", buttons: [{ label: "Today", command: "Today" }, { label: "Tomorrow", command: "Tomorrow" }] }]);
+  assert.deepEqual(slackPosts({ messages: [], choices: ["Yes"] }).posts, [], "no message, no buttons");
 });
 
 test("open_file: an image is shown to the model, a text file read, a binary refused", async () => {
