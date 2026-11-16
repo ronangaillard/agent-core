@@ -145,8 +145,9 @@ const core = new Core({
     destinations,
     repos,
     ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),
-    // Drafts in the owner's name need his token, and his DM to approve them.
-    draftForOwner: Boolean(userToken && ownerChannel),
+    // AGENT_OWNER_DRAFTS=on: a mention of the owner gets a reply drafted in his name, to approve. Off by default: the
+    // agent does not answer for him unasked. It needs his token, and his DM to approve them.
+    draftForOwner: process.env.AGENT_OWNER_DRAFTS === "on" && Boolean(userToken && ownerChannel),
     ownerSources: github ? ["github"] : [],
     ...(ownerChannel ? { ownerAddress: { connector: "slack", conversation: ownerChannel, thread: "main" } } : {}),
   },

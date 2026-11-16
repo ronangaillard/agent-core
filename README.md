@@ -57,8 +57,9 @@ npm start
 Variables: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `OWNER_SLACK_ID` (required); `AGENT_DB` (default `data/agent.db`),
 `AGENT_PROMPTS` (default `data/prompts`: the prompts, one Markdown file each, written with their defaults when
 missing and read at every use, so an edit applies at the next message), `AGENT_PERSONA` (default `<AGENT_PROMPTS>/persona.md`), `AGENT_MEMORY` (default `data/memory`), `AGENT_OWNER_CHANNEL` (the owner's
-DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: with
-`AGENT_OWNER_CHANNEL`, turns on drafts in his name), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
+DM: alerts, and what waits for the owner), `AGENT_OWNER_NAME`, `SLACK_USER_TOKEN` (the owner's token: posts
+in his name, search), `AGENT_OWNER_DRAFTS` (`on`: a mention of the owner gets a reply drafted in his name, to approve;
+needs `SLACK_USER_TOKEN` and `AGENT_OWNER_CHANNEL`; off by default), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
 memory's `common/`, not only the owner's; the persona is never in it), `AGENT_PRIVACY` (`off`: every
 conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
 `CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_TASK_MODEL` (code tasks, default `opus`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
