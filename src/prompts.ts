@@ -17,7 +17,8 @@ export const DEFAULT_PROMPTS: Record<string, string> = {
     "You decide whether the agent should speak in a conversation ({{label}}). It reads everything but speaks little: silence is the rule. Speak only if it is addressed, talked about, answered, or has a concrete and decisive piece of information nobody else gave.",
   "gate-react":
     "When the agent does not speak, it may still react to the last message with one emoji (reaction: its name, e.g. thumbsup, eyes, joy), like a colleague reading: rarely, only when a person would.",
-  "ask-new": "The last {{count}} message(s) are new: answer them.",
+  "ask-new":
+    "The last {{count}} message(s) are new. Answer only if they call for you or you have something useful to add; otherwise say nothing (empty) or just react.",
   "ask-late": "Some messages arrived while you were away: take it into account.",
   "ask-event":
     "Something happened, it is not a message from someone:\n<event>\n{{event}}\n</event>\nAct on it as your memory and instructions say: in this conversation if people read it, or with your tools (tell the people concerned), or do nothing.",

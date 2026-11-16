@@ -304,7 +304,7 @@ test("prompts: files written with their defaults, read at every use, edits apply
   assert.match(systems[1]!, /pirate/);
   core.kill();
   // {{name}} filled, an edited file kept at the next start.
-  assert.equal(new Prompts(dir).text("ask-new", { count: 3 }), "The last 3 message(s) are new: answer them.");
+  assert.equal(new Prompts(dir).text("ask-new", { count: 3 }), "The last 3 message(s) are new. Answer only if they call for you or you have something useful to add; otherwise say nothing (empty) or just react.");
   assert.equal(readFileSync(join(dir, "persona.md"), "utf8"), "You are Steve.");
 });
 
