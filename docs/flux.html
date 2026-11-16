@@ -14,7 +14,7 @@ body{margin:0}
 a{color:#2457C5}a:hover{color:#1A3F91}
 </style>
 </helmet>
-<div style="position: relative; width: 3620px; height: 2940px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
+<div style="position: relative; width: 3620px; height: 2800px; background: #F7F7F5; font-family: Inter, system-ui, sans-serif; color: #1F1F1C; font-size: 14px; line-height: 20px">
 
 <div style="position: absolute; left: 704px; top: 200px; width: 1320px; height: 1440px; box-sizing: border-box; background: #F1EFEA; border: 1px solid #D6D0C4; border-radius: 18px"></div>
 <div style="position: absolute; left: 2104px; top: 200px; width: 1452px; height: 1440px; box-sizing: border-box; background: #EEF2FA; border: 1px solid #C9D5EE; border-radius: 18px"></div>
@@ -48,7 +48,7 @@ a{color:#2457C5}a:hover{color:#1A3F91}
 <svg width="165" height="8" viewBox="0 0 165 8" preserveAspectRatio="none" style="position: absolute; left: 3001px; top: 556px; width: 165px; height: 8px; overflow: visible; fill: none; stroke: #B85C1E; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><defs><marker id="dc-arrow-head-filled-23" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#B85C1E" stroke="none" style="stroke: none; fill: #B85C1E; fill: context-stroke"/></marker></defs><path d="M 165 4 L 4 4" marker-end="url(#dc-arrow-head-filled-23)"></path></svg>
 
 <div style="position: absolute; left: 64px; top: 40px; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.01em">Diagram: a Slack message, end to end</div>
-<div style="position: absolute; left: 64px; top: 80px; width: 3000px; color: #5E5E58">Follow the numbers. In blue: what writes or reads SQLite (<b>inbox</b> and <b>outbox</b> hold state with a status, <b>events</b> keeps the append-only history). Every status transition writes its event (kind listed in the events table) in the same transaction. Dashed orange: the <b>wake()</b> signal, which carries nothing. No polling.</div>
+<div style="position: absolute; left: 64px; top: 80px; width: 3000px; color: #5E5E58">Follow the numbers. Blue: reads or writes SQLite. Dashed orange: the <b>wake()</b> signal, which carries nothing. No polling.</div>
 <div style="position: absolute; left: 728px; top: 216px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #6E5F45">SLACK CONNECTOR</div>
 <div style="position: absolute; left: 2128px; top: 216px; font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.08em; color: #2457C5">CORE</div>
 
@@ -63,85 +63,61 @@ message {
 }</span></span></div>
 
 <div style="position: absolute; left: 736px; top: 240px; width: 320px; height: 440px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D6D0C4; border-radius: 10px"><span><b style="font-size: 15px">Socket Mode</b> <span style="color: #5E5E58">(Bolt)</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">websocket, no signed POST
-Bolt acks the event by itself,
-  before the listener (checked
-  in Bolt's App.js)
-hands the event to the connector
+Bolt acks each event itself,
+then hands it to the connector
 
 catch-up at startup and after
-an outage of more than N s, 24 h
-at most,
-from the stored cursor, advanced
-only by a complete pass
-(threads re-read 7 d back); caught up:
-older than Steve's last post
-in the thread, or more
-than 1 h old (except DM, mention)
-→ ignored; failure → retry on timer;
-marked caught_up: "arrived
-while you were away"
+an outage: re-reads what was
+missed, from a stored cursor;
+those messages are marked
+caught_up
+
 "connected" → wake() outbound</span></span></div>
 
-<div style="position: absolute; left: 1160px; top: 280px; width: 824px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D6D0C4; border-radius: 10px"><span><b style="font-size: 15px">Build Message + Address</b> <span style="color: #5E5E58">· fast: a Slack call only on a cache miss</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">address = {
-  connector: "slack", conversation: event.channel,
-  thread: DM ? (thread_ts ?? "main") : (thread_ts ?? ts),
-          // DM: the whole conversation = one thread, reply in the flow
-  ts: event.ts          // the triggering message (reaction, anchor)
+<div style="position: absolute; left: 1160px; top: 280px; width: 824px; height: 400px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D6D0C4; border-radius: 10px"><span><b style="font-size: 15px">Build Message + Address</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">address = {
+  connector: "slack",
+  conversation: event.channel,
+  thread: thread_ts ?? ts,     // in a DM: thread_ts ?? "main"
+  ts: event.ts                 // the triggering message
 }
 message = {
-  source_id: "slack:C0TECH:1731512399.0107",  // dedup key
-  author_id: event.user (Slack id),  author_kind: bot_id ? "bot" : "human",
-  owner_only: bot's DM with the owner (known id),  sent_at: ISO,
-  private: DM or group per channel_type; channel: cache, 1 if unknown,
-  payload: the raw event, address   // opaque to the core
+  source_id: "slack:C0TECH:1731512399.0107",   // dedup key
+  author_id,  author_kind: "human" | "bot",
+  private,  owner_only,  sent_at,
+  payload: the raw event, address              // opaque to the core
 }
-+ dm, mentions_agent, mentions_owner, mode_key, text (raw)
-bot not a member (cache; a miss = one call) → null, never stored
-  (e.g. owner's DM with a third party: never read)</span></span></div>
++ dm, mentions_agent, mentions_owner, mode_key, text
+
+bot not a member of the conversation → null, never stored</span></span></div>
 
 <div style="position: absolute; left: 1160px; top: 1280px; width: 824px; height: 200px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #D6D0C4; border-radius: 10px"><span><b style="font-size: 15px">deliver(address, post)</b> <span style="color: #5E5E58">· one post at a time</span><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">chat.postMessage({ channel: address.conversation,
-  thread_ts: address.thread, text }); as: owner → user token
-returns ok + ts of the posted message, or the error
-  (rate limit, archived channel…)</span></span></div>
+  thread_ts: address.thread, text })
+as: owner → posted with the user token
+returns ok + ts of the posted message, or the error</span></span></div>
 
 <div style="position: absolute; left: 2144px; top: 280px; width: 380px; height: 360px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Ingestion</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">one transaction:
-  INSERT inbox
-    status: pending
-    source_id UNIQUE
+  INSERT inbox, status pending
   INSERT events received
-    (ref inbox.id, no payload)
-  duplicate (catch-up, retry):
-    nothing, already received
+  duplicate source_id: nothing
 </span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">
 then wake()  // inbound queue
 
-durable before any slow
-processing; Bolt already acked:
-the ack → INSERT window is
-covered by the catch-up</span></span></div>
+durable before any slow processing</span></span></div>
 
 <div style="position: absolute; left: 2620px; top: 200px; width: 380px; height: 500px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Inbound queue</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">on wake(), and once at startup:
 </span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">  threads with pending inbox rows (6)
-</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">  head not in backoff; attempts ≥ 2 →
-    failed + alert; failure before batch:
-    backoff, counted on the faulty message
-  busy = Set, or outbox pending /
-    delivering (held excluded)
-  per free thread, Set.add before any
-    await (≤ 3 respond; triage off quota):
-    owner commands (their DM, row.text):
-      by code, end
-    filter (dm, mentions, mode_key):
-      system → kept, alone; cap 20 bot/
-      system &lt; 1 h per thread → failed;
-      dm → kept; channel mode;
-      mentions Ronan, Steve stays quiet →
-      held draft
-    ignored → done, end
-    settle 1 s / 8 s, re-armed per row,
-      30 s at most; then batch frozen (ids)
-<span style="color: #1A3F91">    attempts + 1 (transaction)</span>
-    respond(batch, minimum scope)</span></span></div>
+</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">
+for each free thread (≤ 3 respond):
+  owner commands → handled by code, end
+  filter: ignored → done, end
+  settle: short wait, re-armed by each
+    new message; then batch frozen
+<span style="color: #1A3F91">  attempts + 1</span>
+  respond(batch, narrowest scope)
+
+busy thread = respond() running, or
+  outbox pending / delivering
+attempts ≥ 2 → failed + alert</span></span></div>
 
 <div style="position: absolute; left: 2620px; top: 750px; width: 380px; height: 300px; box-sizing: border-box; padding: 40px 22px 18px; display: flex; gap: 10px; align-items: flex-start; text-align: left; background: #EAF0FB; border: 2px solid #2457C5; border-radius: 190px / 36px"><svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" style="flex: 0 0 28px; fill: none; stroke: #2457C5; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg><span><b style="font-size: 16px">SQLite</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">inbox     state: to handle
 outbox    state: to send
@@ -151,66 +127,47 @@ reminders mutable
 
 columns: below</span></span></div>
 
-<div style="position: absolute; left: 3096px; top: 660px; width: 420px; height: 630px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 12px"><span><b style="font-size: 16px">respond(batch #41 … #44)</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">1. read(address of the last row): up to and
-   incl. that message, bot token; names, images
-<span style="color: #1A3F91">2. re-reads from events what touches this thread
-   (8): acted, silent, replies already delivered</span>
-3. memory (9); &lt;elsewhere&gt;, &lt;in_progress&gt;
-4. scope = the narrowest in the batch;
-   system → never owner
-5. Claude drafts in the connector's format
-   (form.schema), 10 min at most; tool with
-   side effect: key + acted event written with
-   the effect (same transaction)
-<span style="color: #1A3F91">6. form.toPosts(output) → posts, held; one
-   transaction (10): outbox, one row per post
-     (replaces the thread's unapproved held);
-   batch inbox rows (their ids) → done, outcome
-     replied | silent; events drafted | silent
-     with resolved author, readable input, output</span>
-transient failure → backoff 1, 5, 30 min not
-  counted, 6 h at most (then failed + alert);
-  crash or durable error: already counted;
-  SIGTERM: attempts - 1
+<div style="position: absolute; left: 3096px; top: 660px; width: 420px; height: 630px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 12px"><span><b style="font-size: 16px">respond(batch #41 … #44)</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">1. reads the thread from Slack, up to the
+   batch's last message
+<span style="color: #1A3F91">2. reads from events what it already did
+   in this thread (8)</span>
+3. reads memory (9)
+4. Claude drafts the reply, at the narrowest
+   scope in the batch
+<span style="color: #1A3F91">5. one transaction (10):
+   outbox: one row per post
+   batch inbox rows → done,
+     outcome replied | silent
+   events drafted | silent</span>
+
+transient failure → retried with backoff,
+  then failed + alert
+
 <span style="color: #B85C1E">finally: wake(); no reply → releases the
   thread; else locked until batch delivered</span></span></span></div>
 
-<div style="position: absolute; left: 3096px; top: 1320px; width: 420px; height: 170px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Memory</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">Markdown files
-a single shared memory
+<div style="position: absolute; left: 3096px; top: 1320px; width: 420px; height: 170px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Memory</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">Markdown files, a single shared memory
 re-read on each message:
   no model-side session</span></span></div>
 
-<div style="position: absolute; left: 2620px; top: 1220px; width: 380px; height: 320px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Outbound queue</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">on wake(), once at
-startup, or on the timer
-next_attempt_at:
-</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">  pending outbox whose
-  next_attempt_at ≤ now
-  (11); held excluded
+<div style="position: absolute; left: 2620px; top: 1220px; width: 380px; height: 320px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Outbound queue</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">on wake(), once at startup,
+or on the retry timer:
+</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #1A3F91">  pending outbox rows that
+  are due (11)
 </span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36">
-  a batch (same batch_id) goes
-  out in id order, blocked
-  on its head: post 2 never
-  overtakes post 1
-  hands the post to delivery (12)</span></span></div>
+a batch goes out in order:
+  post 2 never overtakes post 1
+hands each post to delivery (12)</span></span></div>
 
 <div style="position: absolute; left: 2144px; top: 1140px; width: 420px; height: 500px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: flex-start; text-align: left; background: #FFFFFF; border: 1px solid #C9D5EE; border-radius: 10px"><span><b style="font-size: 15px">Delivery</b><br><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 17px; white-space: pre; color: #3A3A36"><span style="color: #1A3F91">status delivering (13)</span>
-always deliver; deliver(address, post)
-  (14), with a timeout (30 s)
-  ok → <span style="color: #1A3F91">delivered + ref, sent_at + event
-    delivered</span>
-  transient (surely not sent: 429, 5xx
-    received, connection refused pre-send)
-    → <span style="color: #1A3F91">next_attempt_at</span>, uncounted backoff,
-    6 h at most, then dead + alert
-  durable error (archived channel) → dead
-    immediately + alert
-  "connected": one more wake()
-  timeout or ambiguous error → orphan
-orphan or delivering at startup: dead,
-  reason unknown, alert (same transaction);
-  never resent, the batch goes on (a failing
-  alert does not alert)
-SIGTERM: waits for in-flight posts
+deliver(address, post) (14), with a timeout
+  ok → <span style="color: #1A3F91">delivered + ref, sent_at</span>
+  transient error → <span style="color: #1A3F91">next_attempt_at</span>,
+    retried with backoff, then dead + alert
+  durable error → dead + alert
+  timeout or ambiguous error → dead + alert,
+    never resent
+
 batch terminal: releases thread + wake()</span></span></div>
 
 <div style="position: absolute; left: 300px; top: 408px; width: 24px; height: 24px; border-radius: 12px; background: #1F1F1C; color: #FFFFFF; font-size: 12px; line-height: 24px; font-weight: 700; text-align: center">1</div>
@@ -251,20 +208,20 @@ batch terminal: releases thread + wake()</span></span></div>
 
 <div style="position: absolute; left: 64px; top: 1720px; width: 2636px; height: 360px; box-sizing: border-box; padding: 24px 28px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: min-content; column-gap: 48px; row-gap: 10px; background: #FFFFFF; border: 1px solid #D9D9D4; border-radius: 14px; font-size: 14px; line-height: 20px">
 <div><b>1</b> Ronan writes "@Steve can you review the PR?" in a #tech thread.</div>
-<div><b>7</b> For each free thread (at most 3 runs in parallel): owner commands, filter, settle re-armed on each message, frozen batch, attempts + 1, then respond() at the narrowest scope.</div>
+<div><b>7</b> For each free thread: filter, wait for the burst to settle, freeze the batch, then respond().</div>
 <div><b>13</b> Delivery moves the post to delivering.</div>
 <div><b>2</b> Slack pushes the event over the websocket (Socket Mode).</div>
-<div><b>8</b> respond() re-reads the thread from Slack with the bot token, up to the batch's last message, and from events what it has already done here.</div>
-<div><b>14</b> deliver(address, post) to the connector the address names.</div>
+<div><b>8</b> respond() re-reads the thread from Slack, and from events what it has already done here.</div>
+<div><b>14</b> Delivery calls deliver(address, post) on the connector the address names.</div>
 <div><b>3</b> The Socket Mode handler hands the event to the connector.</div>
 <div><b>9</b> It re-reads the Markdown memory.</div>
-<div><b>15</b> The connector posts in the original thread and returns ref and sent_at (kept in outbox); on failure, it says whether the error is transient.</div>
-<div><b>4</b> The connector builds the row and its Address; a Slack call only if the membership cache does not know the conversation.</div>
-<div><b>10</b> One transaction: one outbox row per post, the batch's inbox rows (by their ids) go to done (replied or silent), and the drafted / silent events.</div>
+<div><b>15</b> The connector posts in the original thread and returns ok + ts, or the error.</div>
+<div><b>4</b> The connector builds the Message and its Address.</div>
+<div><b>10</b> One transaction: one outbox row per post, the batch's inbox rows go to done, and the drafted / silent events.</div>
 <div><b>16</b> Ronan sees Steve's reply.</div>
-<div><b>5</b> Ingestion writes inbox (pending, source_id UNIQUE, raw event) and the received event in one transaction, then wake(). Bolt has already acked.</div>
-<div><b>11</b> Woken by wake(), the outbound queue reads pending outbox rows whose retry time has come.</div>
-<div style="color: #B85C1E"><b>wake()</b>: ingestion wakes the inbound queue; respond() wakes the outbound one. The thread stays locked until its reply is delivered: the next respond() always sees it.</div>
+<div><b>5</b> Ingestion writes the inbox row (pending) and the received event in one transaction, then wake().</div>
+<div><b>11</b> Woken by wake(), the outbound queue reads the pending outbox rows that are due.</div>
+<div style="color: #B85C1E"><b>wake()</b>: ingestion wakes the inbound queue; respond() wakes the outbound one. The thread stays locked until its reply is delivered.</div>
 <div><b>6</b> Woken by wake(), the inbound queue reads the threads with pending inbox rows.</div>
 <div><b>12</b> It hands each post to delivery.</div>
 <div style="color: #5E5E58"><b>At startup</b>: one pass of each queue, and the Slack catch-up. No polling loop.</div>
@@ -272,65 +229,52 @@ batch terminal: releases thread + wake()</span></span></div>
 
 <div style="position: absolute; left: 2780px; top: 1720px; width: 776px; height: 400px; box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column; gap: 8px; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 14px; font-size: 13.5px; line-height: 19px">
 <div style="font-size: 15px; font-weight: 700">Edge cases</div>
-<div><b>Thread moving</b> during drafting: the reply goes out anyway; the new message gets its answer right after, once the first is delivered. At most two answers per burst. No refused.</div>
-<div><b>Silence</b>: inbox done, outcome silent, event silent. Nothing is replayed.</div>
-<div><b>Crash or failure of respond()</b>: attempts counted before the run; on the 2nd pickup, failed and alert. No crash loop.</div>
-<div><b>Crash or timeout while sending</b>: never resent; owner alert. <b>Stuck model call</b>: abandoned after 10 min, retried later.</div>
+<div><b>Thread moving</b> during drafting: the reply goes out anyway; the new message gets its answer right after.</div>
+<div><b>Silence</b>: inbox done, outcome silent. Nothing is replayed.</div>
+<div><b>Crash or failure of respond()</b>: on the 2nd pickup, failed and alert. No crash loop.</div>
+<div><b>Crash or timeout while sending</b>: never resent; owner alert.</div>
 <div><b>Re-run</b> after a crash: acted events are re-read, Steve does not redo what it already did.</div>
-<div><b>system</b> (reminder, GitHub): handled alone, never owner; cap of 20 bot/system per thread within 1 h, excluding task reports.</div>
-<div><b>Transient failure</b> (529, quota, network): timer retry with backoff, no attempt counted; the Slack reconnection restarts the outbound.</div>
+<div><b>Transient failure</b> (quota, network): timer retry with backoff, no attempt counted.</div>
 </div>
 
-<div style="position: absolute; left: 64px; top: 2160px; width: 3492px; height: 720px; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 14px">
-<div style="display: flex; align-items: baseline; gap: 16px"><span style="font-size: 18px; line-height: 24px; font-weight: 700">The tables</span><span style="color: #5E5E58">inbox and outbox hold state (status UPDATE); events keeps the history and replaces the current log (activity). Rule: transition(row, status, event) does the UPDATE and the INSERT in the same transaction.</span></div>
+<div style="position: absolute; left: 64px; top: 2160px; width: 3492px; height: 580px; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF; border: 2px solid #2457C5; border-radius: 14px">
+<div style="display: flex; align-items: baseline; gap: 16px"><span style="font-size: 18px; line-height: 24px; font-weight: 700">The tables</span><span style="color: #5E5E58">inbox and outbox hold state (status UPDATE); events keeps the history. Every status transition writes its event in the same transaction.</span></div>
 <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
 <div style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 19px; background: #F4F6FB; border-radius: 8px; padding: 14px 16px; white-space: pre-wrap"><b style="color: #2457C5">inbox</b>  what is left to handle
 id           INTEGER PK
 source_id    TEXT UNIQUE  slack:C0TECH:1731512399.0107
-thread_key   TEXT, indexed (DM: just one, "main")
+thread_key   TEXT, indexed
 address      JSON  {connector, conversation, thread, ts}
-author_id    TEXT  Slack id (never the display name)
+author_id    TEXT  Slack id
 author_kind  human | bot | system
 owner_only   0/1     private  0/1
 payload      JSON  the raw event
-text         the text (commands, system events)
+text         the text
 dm · mentions_agent · mentions_owner · mode_key
-sent_at      ISO, computed by toInbox
+sent_at      ISO
 caught_up    0/1   caught up after an outage
 status       pending | done | failed
-             (the lock is the in-memory Set)
 outcome      replied | silent | ignored
              | intercepted | to_owner
 attempts     INTEGER, +1 before each run
-next_attempt_at  backoff on transient failure
+next_attempt_at  backoff
 received_at · handled_at</div>
 <div style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 19px; background: #F4F6FB; border-radius: 8px; padding: 14px 16px; white-space: pre-wrap"><b style="color: #2457C5">outbox</b>  what is left to deliver
 id              INTEGER PK
-batch_id        the originating batch (its inbox ids);
+batch_id        the originating batch;
                 NULL for send, report, alert
 thread_key      TEXT
 address         JSON
 kind            reply | send | report | alert | reaction
-                (send: send(), delivered right
-                 away; report: task report,
-                 queued)
 payload         JSON  ONE post: { text, as?: owner } | { reaction }
-                (as owner: approved draft)
 status          held | pending | delivering
                 | delivered | dead
-                (held: uncertain e-mail or draft
-                 as the owner; send n → pending;
-                 drop n → dead dropped; replaced
-                 by a new draft in the thread → dead
-                 replaced, "send" on the old one is
-                 refused; does not lock the thread)
+                (held: uncertain e-mail or
+                 draft as the owner)
 attempts        INTEGER
-next_attempt_at TEXT  (backoff, setTimeout)
-ref · sent_at   Slack ts or Message-ID; for editing
-idem_key        UNIQUE for send: written with
-                delivering, before the call, in the
-                same transaction as the acted event
-                (originating thread_key)
+next_attempt_at TEXT  backoff
+ref · sent_at   Slack ts or Message-ID
+idem_key        UNIQUE, for send
 created_at</div>
 <div style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 19px; background: #F4F6FB; border-radius: 8px; padding: 14px 16px; white-space: pre-wrap"><b style="color: #2457C5">events</b>  what happened, append-only
 id · at
@@ -338,28 +282,23 @@ kind         received · ignored · intercepted
              · to_owner · drafted · silent
              · failed · acted
              · released · delivering · delivered
-             · delivery_failed (each transient
-               attempt) · dead (+ reason)
+             · delivery_failed · dead
              · reminder_set · reminder_due
              · task_started · task_waiting · task_failed
              · task_done · task_abandoned · capped
-             · tool · run · error (the trace: every tool
-               call and model run, for the debug view)
+             · tool · run · error (the trace)
 thread_key · address · author_id · author_kind
 private      0/1
-payload      JSON  drafted, silent: resolved author,
-                   readable input, output
+payload      JSON
 ref          inbox.id or outbox.id
-read by: debug view, &lt;elsewhere&gt; digest, search
-(digest and search: only the threads
- where Steve has a delivered, drafted or silent)</div>
+read by: debug view, &lt;elsewhere&gt; digest, search</div>
 </div>
-<div style="color: #5E5E58; font-size: 13px"><b>reminders</b> stays a mutable table {kind reminder | job, job, due_at, note, address, repeat_minutes, created_by}: cancel = DELETE, re-arm = UPDATE. A single timer on the next due time (capped at 24 days, re-armed on every change). When due, <b>a single transaction</b> creates the system inbox row (source_id reminder:id:due_at) and re-arms or deletes the reminder. A <b>job</b> (memory review, scenarios) calls a named function, outside inbox, invisible to tools. <b>held</b> is for e-mails Steve is unsure about and for drafts on the owner's behalf; polls go through send; a permission a code task lacks is refused (no card to the owner). The catch-up cursor lives in the <b>cursors</b> table (retries on the same timer).</div>
+<div style="color: #5E5E58; font-size: 13px"><b>reminders</b> is a mutable table: cancel = DELETE, re-arm = UPDATE. A single timer waits for the next due time; when due, <b>a single transaction</b> creates the system inbox row and re-arms or deletes the reminder. The catch-up cursor lives in the <b>cursors</b> table.</div>
 </div>
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":3620,"height":2940}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":3620,"height":2800}}'>
 class Component extends DCLogic {
 renderVals() {
 return {};
