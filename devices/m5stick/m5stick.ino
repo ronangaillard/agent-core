@@ -324,7 +324,7 @@ void draw(uint32_t now) {
       if (dots > 0) cell(21, 4, C_BLACK);
       if (dots > 1) cell(23, 2, C_BLACK);
       if (dots > 2) cell(24, 0, C_BLACK), cell(25, 0, C_BLACK);
-      title = sub == "triage" ? "il lit" : "il cogite";
+      title = sub == "triage" ? "lit" : "cogite";
       sub = sub == "triage" ? "en parle-t-on ?" : "";
       break;
     }
@@ -341,14 +341,14 @@ void draw(uint32_t now) {
       eyes(1, 1, (now % 3000) < 120);
       mouth((now / 160) % 2);
       band(0x7F);
-      title = "il ecrit...";
+      title = "ecrit...";
       break;
     }
     case CODING: {
       eyes((now / 700) % 3, 1);
       band(1u << ((now / 120) % 7) | 1u << (6 - (now / 120) % 7));
       ic = ICON_CODE;
-      title = "il code";
+      title = "code";
       if (shown.tasks > 1) sub += " +" + String(shown.tasks - 1);
       break;
     }
