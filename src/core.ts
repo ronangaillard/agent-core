@@ -8,7 +8,7 @@ import { inProgress, taskTools, taskVisible, type TaskRunner } from "./tasks.ts"
 import { digest } from "./history.ts";
 import type { Memory } from "./memory.ts";
 import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type TaskRecord } from "./store.ts";
-import { TransientError, type Address, type BoundTool, type Brain, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef, type ToolResult } from "./types.ts";
+import { TransientError, type Address, type BoundTool, type Brain, type Button, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef, type ToolResult } from "./types.ts";
 
 /** The images the model sees, and their size limit (the API's is 5 MB). */
 const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -104,6 +104,8 @@ export type Command = {
   run(match: RegExpMatchArray, core: Core): Promise<string>;
   /** How this command applies to a lot waiting for the owner, shown with it (e.g. "send 12"). */
   hint?(batch: number): string;
+  /** The same as a button, where the connector has buttons (e.g. "Send" → "send 12"). */
+  button?(batch: number): Button;
 };
 
 /** Code on a schedule (a digest, a cleanup…): never seen by the tools, set again at each start. */
@@ -1096,22 +1098,25 @@ export class Core {
       {
         ...(draft ? { outcome: "to_owner" } : {}),
         ...(this.config.ownerAddress
-          ? { notice: { address: this.config.ownerAddress, threadKey: this.threadKeyOf(this.config.ownerAddress), text: this.notice(lot[0]!.id, thread.label, note, texts) } }
+          ? { notice: { address: this.config.ownerAddress, threadKey: this.threadKeyOf(this.config.ownerAddress), post: this.notice(lot[0]!.id, thread.label, note, texts) } }
           : {}),
       },
     );
   }
 
   /** What the owner reads when something waits for him. */
-  private notice(batch: number, place: string, note: string | undefined, texts: string[]) {
-    const hints = (this.options.commands ?? []).map((command) => command.hint?.(batch)).filter(Boolean);
-    return [
+  private notice(batch: number, place: string, note: string | undefined, texts: string[]): Post {
+    const commands = this.options.commands ?? [];
+    const hints = commands.map((command) => command.hint?.(batch)).filter(Boolean);
+    const buttons = commands.flatMap((command) => (command.button ? [command.button(batch)] : []));
+    const text = [
       `Waiting for you (#${batch}), ${place}.${note ? ` ${note}` : ""}`,
       texts.map((text) => text.replace(/^/gm, "> ")).join("\n>\n"),
       hints.length ? hints.join(" · ") : "",
     ]
       .filter(Boolean)
       .join("\n");
+    return { text, ...(buttons.length ? { buttons } : {}) };
   }
 
   // --- outbound ------------------------------------------------------------------------------------------------

@@ -40,9 +40,12 @@ export type InboxRow = {
   caught_up?: boolean;
 };
 
+/** A button under a post: clicking it is the clicker typing its command in that conversation. */
+export type Button = { label: string; command: string; style?: "primary" | "danger" };
+
 export type Post =
-  /** as "owner": posted in the owner's name (a draft he validated). */
-  | { text: string; as?: "owner" }
+  /** as "owner": posted in the owner's name (a draft he validated). buttons: shown by a connector that can (Slack). */
+  | { text: string; as?: "owner"; buttons?: Button[] }
   /** An emoji (its name, e.g. "thumbsup") on the message of the address (its ts). Only to a connector that reacts. */
   | { reaction: string };
 

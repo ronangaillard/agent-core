@@ -331,6 +331,26 @@ test("github: the catch-up throws on a failed read (the core retries, the cursor
   await new Promise<void>((resolve) => api.close(() => resolve()));
 });
 
+test("slack: a post with buttons becomes sections of text and one row of buttons whose value is the command", async () => {
+  const { withButtons } = await import("../src/connectors/slack.ts");
+  const blocks = withButtons("x".repeat(3000), [{ label: "Send", command: "send 3", style: "primary" }, { label: "Drop", command: "drop 3" }]) as { type: string; text?: { text: string }; elements?: { action_id: string; value: string; style?: string }[] }[];
+  assert.deepEqual(blocks.map((b) => b.type), ["section", "section", "actions"]);
+  assert.equal(blocks[0]!.text!.text.length + blocks[1]!.text!.text.length, 3000);
+  // Cut at a line when there is one: a quoted line keeps its "> ".
+  const lines = withButtons(Array.from({ length: 60 }, (_, i) => `> line ${i} ${"x".repeat(60)}`).join("\n"), []) as typeof blocks;
+  assert.ok(lines.filter((b) => b.type === "section").every((b) => b.text!.text.startsWith("> line")));
+  assert.deepEqual(blocks[2]!.elements!.map((e) => [e.action_id, e.value, e.style]), [["agent_command_0", "send 3", "primary"], ["agent_command_1", "drop 3", undefined]]);
+});
+
+test("slack: a click in a direct message is the clicker typing the command; the card then shows what was asked", async () => {
+  const { clickOf } = await import("../src/connectors/slack.ts");
+  const body = { user: { id: "UOWNER" }, channel: { id: "D123" }, message: { ts: "100.1", text: "Waiting for you (#3)", blocks: [{ type: "section" }, { type: "actions" }] } };
+  const click = clickOf(body, { value: "send 3", action_ts: "100.5", text: { text: "Send" } })!;
+  assert.deepEqual(click.message, { type: "message", channel: "D123", channel_type: "im", user: "UOWNER", text: "send 3", ts: "100.5" });
+  assert.deepEqual(click.card?.blocks, [{ type: "section" }, { type: "context", elements: [{ type: "mrkdwn", text: "→ Send (<@UOWNER>)" }] }]);
+  assert.equal(clickOf({ ...body, channel: { id: "C999" } }, { value: "send 3", action_ts: "100.5" }), null, "never outside a direct message");
+});
+
 test("open_file: an image is shown to the model, a text file read, a binary refused", async () => {
   const world = new World();
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);

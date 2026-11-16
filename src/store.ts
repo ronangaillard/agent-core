@@ -505,7 +505,7 @@ export class Store {
     posts: Post[],
     held: boolean,
     readable: { input: string; output: string; author?: string; place?: string; for_owner?: boolean; held?: boolean; reaction?: string },
-    options: { outcome?: string; notice?: { address: Address; threadKey: string; text: string } } = {},
+    options: { outcome?: string; notice?: { address: Address; threadKey: string; post: Post } } = {},
   ) {
     const last = lot[lot.length - 1]!;
     // A reaction is not a reply: it never replaces a held reply, never makes the agent "spoken" in the thread.
@@ -529,10 +529,10 @@ export class Store {
       this.db.prepare(`UPDATE inbox SET status = 'done', outcome = ?, handled_at = ? WHERE id IN (${placeholders(ids)})`).run(options.outcome ?? (replied ? "replied" : "silent"), now(), ...ids);
       // What waits for the owner is announced to him in the same transaction: never a held post he does not know of.
       if (replied && held && options.notice) {
-        const { address, threadKey, text } = options.notice;
+        const { address, threadKey, post } = options.notice;
         this.db
           .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
-          .run(threadKey, address.connector, JSON.stringify(address), JSON.stringify({ text }), now());
+          .run(threadKey, address.connector, JSON.stringify(address), JSON.stringify(post), now());
       }
       this.event({ kind: replied ? "drafted" : "silent", thread_key: last.thread_key, author_id: last.author_id, author_kind: last.author_kind, private: lot.some((r) => r.private), ref: lot[0]!.id, payload: readable });
     });

@@ -21,6 +21,12 @@ test("held: a reply that waits for the owner leaves nothing, is announced to him
   assert.match(notice!, new RegExp(`Waiting for you \\(#${id}\\).*Paul asks for a discount`));
   assert.match(notice!, /> reply 1/);
   assert.match(notice!, new RegExp(`send ${id}: <your text> · drop ${id}`));
+  // And as buttons where the connector has them: a click is the command.
+  const card = connector.sent.find((s) => s.address.conversation === "owner")!.post;
+  assert.deepEqual("buttons" in card ? card.buttons : undefined, [
+    { label: "Send", command: `send ${id}`, style: "primary" },
+    { label: "Drop", command: `drop ${id}`, style: "danger" },
+  ]);
   assert.equal(textsIn(connector, "mail").length, 0);
   // The thread is free: a second message is answered, and its held reply replaces the first.
   core.ingest(world.say("any news?", { thread: "mail", author: "paul", ownerOnly: false }), "fake");

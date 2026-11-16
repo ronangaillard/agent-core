@@ -147,7 +147,9 @@ Step 3, done:
 Step 4, done:
 - `held`: a reply the form keeps for the owner (an e-mail the agent was not sure of, a draft in his name) never
   leaves alone and never locks its thread; a newer one in the thread replaces it. The owner is told in the same
-  transaction, in his DM, with the draft, the form's note and how to act on it.
+  transaction, in his DM, with the draft, the form's note and how to act on it: buttons (Send, Drop) where the
+  connector has them (Slack, in a direct message), the text commands always written too. A command offers its button (`Command.button`); on Slack a
+  click is the clicker typing that command in that DM (in first), and the card then shows what was asked.
 - The owner's commands, matched by code on the rows of his private conversation before anything else (outcome
   `intercepted`, no model call): list, send as is or edited, drop. Slack only: an e-mail never gets the owner's
   scope nor a command (DMARC vouches for a domain, not a mailbox).

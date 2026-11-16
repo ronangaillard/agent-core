@@ -26,12 +26,14 @@ export function ownerCommands(): Command[] {
       pattern: /^send\s+#?(\d+)(?:\s*:\s*([\s\S]+))?$/i,
       help: "send <n>, or send <n>: <your text>: let it leave, as is or edited",
       hint: (batch) => `send ${batch} · send ${batch}: <your text>`,
+      button: (batch) => ({ label: "Send", command: `send ${batch}`, style: "primary" }),
       run: async (match, core) => (core.release(Number(match[1]), match[2]?.trim()) ? `#${match[1]} leaves now.` : `Nothing waits as #${match[1]}.`),
     },
     {
       pattern: /^drop\s+#?(\d+)$/i,
       help: "drop <n>: never send it",
       hint: (batch) => `drop ${batch}`,
+      button: (batch) => ({ label: "Drop", command: `drop ${batch}`, style: "danger" }),
       run: async (match, core) => (core.drop(Number(match[1])) ? `#${match[1]} dropped.` : `Nothing waits as #${match[1]}.`),
     },
     {

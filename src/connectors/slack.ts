@@ -1,6 +1,6 @@
 import bolt from "@slack/bolt";
 import { z } from "zod";
-import { TransientError, type Address, type Connector, type DeliverResult, type InboxRow, type Post, type SharedFile, type Thread } from "../types.ts";
+import { TransientError, type Address, type Button, type Connector, type DeliverResult, type InboxRow, type Post, type SharedFile, type Thread } from "../types.ts";
 
 const { App, SocketModeReceiver, webApi } = bolt;
 
@@ -34,6 +34,47 @@ type SlackMessage = {
   /** Unfurls and bots' attachments. */
   attachments?: { pretext?: string; title?: string; text?: string; fallback?: string }[];
 };
+
+/** The buttons under a post: their action ids share this prefix; a button's value is its command. */
+const COMMAND_ACTION = /^agent_command_\d+$/;
+
+/** A post with buttons, as blocks: the text in sections (3,000 characters each at most, cut at a line), then the buttons. */
+export function withButtons(text: string, buttons: Button[]): unknown[] {
+  const sections: unknown[] = [];
+  let rest = text;
+  while (rest.trim() && sections.length < 40) {
+    let cut = rest.length <= 2900 ? rest.length : rest.lastIndexOf("\n", 2900);
+    if (cut < 1000) cut = 2900;
+    const piece = rest.slice(0, cut);
+    if (piece.trim()) sections.push({ type: "section", text: { type: "mrkdwn", text: piece } });
+    rest = rest.slice(cut).replace(/^\n/, "");
+  }
+  const elements = buttons.slice(0, 5).map((button, index) => ({
+    type: "button",
+    action_id: `agent_command_${index}`,
+    text: { type: "plain_text", text: button.label.slice(0, 75) },
+    value: button.command.slice(0, 2000),
+    ...(button.style ? { style: button.style } : {}),
+  }));
+  return [...sections, { type: "actions", elements }];
+}
+
+/**
+ * A click on one of these buttons → the message it stands for (the clicker typing the command, in a direct message
+ * only: a command is never read elsewhere), and the card to put in place of the one clicked (its buttons replaced by
+ * what was asked). Pure: Slack's payload in, what to do out.
+ */
+export function clickOf(body: unknown, action: unknown): { message: SlackMessage & { type: string }; card?: { channel: string; ts: string; text: string; blocks: unknown[] } } | null {
+  const click = body as { user?: { id?: string }; channel?: { id?: string }; message?: { ts?: string; text?: string; blocks?: { type?: string }[] } };
+  const button = action as { value?: string; action_ts?: string; text?: { text?: string } };
+  const channel = click.channel?.id;
+  if (!channel?.startsWith("D") || !click.user?.id || !button.value || !button.action_ts) return null;
+  const message = { type: "message", channel, channel_type: "im", user: click.user.id, text: button.value, ts: button.action_ts };
+  if (!click.message?.ts) return { message };
+  const kept = (click.message.blocks ?? []).filter((block) => block.type !== "actions");
+  const asked = { type: "context", elements: [{ type: "mrkdwn", text: `→ ${button.text?.text ?? button.value} (<@${click.user.id}>)` }] };
+  return { message, card: { channel, ts: click.message.ts, text: click.message.text ?? "", blocks: [...kept, asked] } };
+}
 
 /** A thread is read whole up to the message (paged), the model gets its last messages. */
 const THREAD_PAGES = 10;
@@ -229,6 +270,15 @@ export function slackConnector(options: {
         if (event.user === self.userId) member.set(event.channel, true);
       });
       app.event("channel_left", async ({ event }) => void member.set(event.channel, false));
+      // A button: its command, as if the clicker typed it in that conversation (in through the sink first: that is
+      // what must not be lost); then the card shows what was asked, so nobody clicks twice.
+      app.action(COMMAND_ACTION, async ({ ack, body, action }) => {
+        await ack();
+        const click = clickOf(body, action);
+        if (!click) return;
+        sink(click.message);
+        if (click.card) void client.chat.update(click.card as never).catch((error: unknown) => console.error("slack: card not updated", error));
+      });
       receiver.client.on("connected", () => connected.forEach((callback) => callback()));
       receiver.client.on("disconnected", () => disconnected.forEach((callback) => callback()));
       await app.start();
@@ -427,12 +477,21 @@ export function slackConnector(options: {
           // Dated by the message reacted to: what the agent has seen, for the catch-up.
           return { ok: true, ref: address.ts!, sent_at: isoOf(address.ts!) };
         }
-        const sent = await client.chat.postMessage({
+        const message = {
           ...(asOwner ? { token: options.userToken } : {}),
           channel: address.conversation,
           text: post.text,
           ...(address.thread !== "main" ? { thread_ts: address.thread } : {}),
-        });
+        };
+        // Buttons only in a direct message (a click is read as a command there only). Refused blocks: certainly not
+        // posted, so the text alone goes, its commands still written in it.
+        const buttons = post.buttons?.length && address.conversation.startsWith("D") ? withButtons(post.text, post.buttons) : undefined;
+        const sent = buttons
+          ? await client.chat.postMessage({ ...message, blocks: buttons as never }).catch((error: { data?: { error?: string } }) => {
+              if (error.data?.error === "invalid_blocks") return client.chat.postMessage(message);
+              throw error;
+            })
+          : await client.chat.postMessage(message);
         const ts = sent.ts ?? "";
         return { ok: true, ref: ts, sent_at: ts ? isoOf(ts) : new Date().toISOString() };
       } catch (error) {
