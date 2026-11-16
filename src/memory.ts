@@ -70,20 +70,57 @@ export class Memory {
   }
 
   /** What is in memory comes up in every prompt as trusted: by default, only the owner's conversation writes it. */
-  write(path: string, content: string, scope: Scope, seen?: Set<string>) {
+  /** A file this scope may write: the owner's conversation (or anyone, writers "all"), never a shelf. */
+  private writable(path: string, scope: Scope): string {
     if (this.writers === "owner" && !scope.owner) throw new Error(`${path}: only the owner's conversation writes the memory`);
     const { file, shelf } = this.resolve(path, scope);
     if (shelf) throw new Error(`${path}: a read-only folder`);
+    return file;
+  }
+
+  /** Whole or not at all: a crash mid-write must not leave a truncated INDEX.md going into every prompt. */
+  private save(file: string, content: string) {
+    mkdirSync(dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, content);
+    renameSync(temp, file);
+  }
+
+  write(path: string, content: string, scope: Scope, seen?: Set<string>) {
+    const file = this.writable(path, scope);
     // The whole file is replaced: one not read in this run would lose what the model never saw.
     if (seen && !seen.has(file) && existsSync(file) && readFileSync(file, "utf8").trim()) {
       throw new Error(`${path} already exists and you have not read it: memory_read it first, then write its whole new content, keeping what still holds`);
     }
     seen?.add(file);
-    mkdirSync(dirname(file), { recursive: true });
-    // Whole or not at all: a crash mid-write must not leave a truncated INDEX.md going into every prompt.
-    const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, content);
-    renameSync(temp, file);
+    this.save(file, content);
+  }
+
+  /**
+   * Part of a file changed, the rest untouched: old (found exactly once) → new. Empty old: new added at the end, the
+   * file created if missing. The file does not count as read: the model saw only that part.
+   */
+  edit(path: string, old: string, text: string, scope: Scope): string {
+    const file = this.writable(path, scope);
+    const exists = existsSync(file);
+    const current = exists ? readFileSync(file, "utf8") : "";
+    let next: string;
+    if (!old) {
+      if (!text.trim()) throw new Error("nothing to add: new is empty");
+      const glue = current && !current.endsWith("\n") ? "\n" : "";
+      next = `${current}${glue}${text}${text.endsWith("\n") ? "" : "\n"}`;
+    } else {
+      if (!exists) throw new Error(`${path} does not exist: leave old empty to create it`);
+      if (old === text) throw new Error("old and new are the same");
+      const count = current.split(old).length - 1;
+      if (count === 0) throw new Error(`${path}: old not found; memory_read it and copy the exact text`);
+      if (count > 1) throw new Error(`${path}: old found ${count} times; include more of the text around it`);
+      // split/join: no $-patterns read in the new text.
+      next = current.split(old).join(text);
+    }
+    this.save(file, next);
+    const big = basename(file) === "INDEX.md" && next.length > INDEX_MAX ? ` Warning: INDEX.md is ${next.length} characters, only the first ${INDEX_MAX} reach the prompt: shorten it.` : "";
+    return `${old ? "changed" : "added"}.${big}`;
   }
 
   /** The memory's Markdown files, and every file of the shelves. */
@@ -117,7 +154,7 @@ export class Memory {
       {
         name: "memory_write",
         description:
-          "Write a memory file (whole content: it replaces the file, so read an existing file first and keep what still holds). common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
+          "Create a memory file, or replace one entirely (a restructure; read it first and keep what still holds). To add or change a line, use memory_edit. common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
         input: { path: z.string(), content: z.string() },
         rules: [this.writers],
         effect: true,
@@ -125,6 +162,15 @@ export class Memory {
           this.write(String(args.path), String(args.content), scope, read);
           return "written";
         },
+      },
+      {
+        name: "memory_edit",
+        description:
+          "Change part of a memory file without rewriting it: the way to add, correct or remove a line. old is the exact text to replace, found once in the file; new replaces it (empty to delete). Leave old empty to add new at the end of the file (created if missing). The rest of the file is untouched.",
+        input: { path: z.string(), old: z.string(), new: z.string() },
+        rules: [this.writers],
+        effect: true,
+        run: async (args, { scope }) => this.edit(String(args.path), String(args.old ?? ""), String(args.new ?? ""), scope),
       },
     ];
   }

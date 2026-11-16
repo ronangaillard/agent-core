@@ -148,6 +148,23 @@ test("tools: the model only sees what the scope allows, and each tool checks aga
   await assert.rejects(() => prod!.run({}), /not allowed/);
 });
 
+test("memory_edit: adds at the end, changes or removes one exact passage, refuses the ambiguous, keeps the rights", () => {
+  const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")));
+  assert.equal(memory.edit("common/INDEX.md", "", "- a.md: first", owner), "added.");
+  memory.edit("common/INDEX.md", "", "- b.md: second\n", owner);
+  assert.equal(memory.read("common/INDEX.md", owner), "- a.md: first\n- b.md: second\n");
+  memory.edit("common/INDEX.md", "first", "the first, $& kept as is", owner);
+  memory.edit("common/INDEX.md", "- b.md: second\n", "", owner);
+  assert.equal(memory.read("common/INDEX.md", owner), "- a.md: the first, $& kept as is\n");
+  assert.throws(() => memory.edit("common/INDEX.md", "nowhere", "x", owner), /not found/);
+  memory.edit("common/x.md", "", "same\nsame", owner);
+  assert.throws(() => memory.edit("common/x.md", "same", "other", owner), /2 times/);
+  assert.throws(() => memory.edit("common/missing.md", "a", "b", owner), /does not exist/);
+  assert.throws(() => memory.edit("common/x.md", "", " ", owner), /nothing to add/);
+  assert.throws(() => memory.edit("common/x.md", "", "planted", colleague), /only the owner/);
+  assert.match(memory.edit("common/INDEX.md", "", "y".repeat(5000), owner), /shorten it/);
+});
+
 test("memory: an existing file is never overwritten unread in a run; a new one, or one read first, is", () => {
   const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")));
   writeFileSync(join(memory.root, "common", "rules.md"), "who to tell after a deploy");
