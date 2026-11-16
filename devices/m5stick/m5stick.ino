@@ -263,19 +263,6 @@ void panel(const char* const* ic, const String& title, const String& sub, uint16
   canvas.clearClipRect();
 }
 
-void footer(uint32_t now) {
-  canvas.setFont(&fonts::Font0);
-  canvas.setTextDatum(bottom_left);
-  bool wireless = strlen(WIFI_SSID) > 0;
-  uint16_t dot = !wireless ? C_GREY : online ? C_GREEN : C_RED;
-  canvas.fillCircle(PANEL_X + 5, H - 7, 3, dot);
-  canvas.setTextColor(C_BLACK);
-  canvas.drawString(!wireless ? "usb" : online ? "en ligne" : hasWifi ? "connexion..." : "wifi...", PANEL_X + 12, H - 2);
-  canvas.setTextDatum(bottom_right);
-  int level = M5.Power.getBatteryLevel();
-  canvas.drawString(level >= 0 ? String(level) + "%" : "", W - 4, H - 2);
-}
-
 void draw(uint32_t now) {
   bool off = strlen(WIFI_SSID) > 0 && !online;
   bool dozing = shown.state == IDLE && now - idleSince > 10 * 60 * 1000;
@@ -360,7 +347,6 @@ void draw(uint32_t now) {
       break;
   }
   panel(ic, title, toastUntil > now ? toast : sub, C_YELLOW);
-  footer(now);
   canvas.pushSprite(0, 0);
   M5.Display.setBrightness(dozing ? 15 : LEVELS[brightness]);
 }
