@@ -88,7 +88,7 @@ a{color:#2457C5}a:hover{color:#1A3F91}
 <table style="border-collapse: collapse; width: 100%; font-size: 13px; line-height: 18px; margin-top: 10px">
 <tbody>
 <tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">scheduler</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">due reminder → address = reminders.address; source_id reminder:id:due_at</td></tr>
-<tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">GitHub</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">final deployment_status → a configured address; source_id github:deploy:&lt;deployment id&gt;, the same via the signed webhook and the startup pass</td></tr>
+<tr><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA; font-weight: 600">GitHub</td><td style="padding: 6px 8px; border-bottom: 1px solid #EEEEEA">a read-only connector: a conversation per repo (github:&lt;owner&gt;/&lt;repo&gt;); final deployment_status, or a finished run of a watched workflow (GITHUB_WORKFLOWS) on the default branch; source_id github:deploy:&lt;deployment id&gt; or github:run:&lt;run id&gt;:&lt;attempt&gt;; no message form, deliver refuses; owner rights (ownerSources), the same via the signed webhook and the startup pass</td></tr>
 <tr><td style="padding: 6px 8px; font-weight: 600">tasks</td><td style="padding: 6px 8px">do not go through the inbox: their reports are outbox reports to tasks.address</td></tr>
 </tbody>
 </table>

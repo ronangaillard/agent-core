@@ -4,6 +4,7 @@ import { claudeBrain } from "./claude.ts";
 import { mcpTools, type McpServerConfig } from "./mcp.ts";
 import { StatusFeed, statusServer } from "./status.ts";
 import { emailConnector } from "./connectors/email.ts";
+import { githubConnector } from "./connectors/github.ts";
 import { debugServer } from "./debug.ts";
 import { slackConnector } from "./connectors/slack.ts";
 import { Core, defaultConfig } from "./core.ts";
@@ -12,7 +13,6 @@ import { historyTools } from "./history.ts";
 import { Memory } from "./memory.ts";
 import { DEFAULT_PROMPTS, Prompts } from "./prompts.ts";
 import { ownerCommands } from "./owner.ts";
-import { githubSource } from "./sources/github.ts";
 import { apercuWorkshop } from "./runners/apercu.ts";
 import { claudeCodeRunner, tokensFromEnv } from "./runners/claude-code.ts";
 import { Store } from "./store.ts";
@@ -83,6 +83,21 @@ const runner =
       })
     : undefined;
 
+/**
+ * GitHub, off without a webhook secret: a conversation per repository where finished deployments and watched workflow
+ * runs (GITHUB_WORKFLOWS, by name, on the default branch) arrive. Nobody reads there: the agent acts with its tools, with
+ * the owner's rights (he configured this source), e.g. telling someone in a direct message, as its memory says.
+ */
+const github = process.env.GITHUB_WEBHOOK_SECRET
+  ? githubConnector({
+      secret: process.env.GITHUB_WEBHOOK_SECRET,
+      port: Number(process.env.GITHUB_WEBHOOK_PORT ?? 8787),
+      ...(process.env.GITHUB_TOKEN ? { token: process.env.GITHUB_TOKEN } : {}),
+      repos: (process.env.GITHUB_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean),
+      workflows: (process.env.GITHUB_WORKFLOWS ?? "").split(",").map((w) => w.trim()).filter(Boolean),
+    })
+  : undefined;
+
 const dbPath = process.env.AGENT_DB ?? "data/agent.db";
 const db = openDb(dbPath);
 
@@ -112,6 +127,7 @@ const core = new Core({
   connectors: [
     slackConnector({ botToken: required("SLACK_BOT_TOKEN"), appToken: required("SLACK_APP_TOKEN"), ownerId, ...(userToken ? { userToken } : {}) }),
     ...(email ? [email] : []),
+    ...(github ? [github] : []),
   ],
   commands: ownerCommands(),
   ...(runner ? { runner } : {}),
@@ -131,6 +147,7 @@ const core = new Core({
     ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),
     // Drafts in the owner's name need his token, and his DM to approve them.
     draftForOwner: Boolean(userToken && ownerChannel),
+    ownerSources: github ? ["github"] : [],
     ...(ownerChannel ? { ownerAddress: { connector: "slack", conversation: ownerChannel, thread: "main" } } : {}),
   },
 });
@@ -141,25 +158,12 @@ const status =
     ? statusServer({ feed: new StatusFeed(core.store), port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN })
     : undefined;
 
-/** GitHub deployments, announced in a channel; off without a webhook secret. */
-const github =
-  process.env.GITHUB_WEBHOOK_SECRET && process.env.GITHUB_DEPLOY_CHANNEL
-    ? githubSource(core, {
-        secret: process.env.GITHUB_WEBHOOK_SECRET,
-        port: Number(process.env.GITHUB_WEBHOOK_PORT ?? 8787),
-        address: { connector: "slack", conversation: process.env.GITHUB_DEPLOY_CHANNEL, thread: "main" },
-        ...(process.env.GITHUB_TOKEN ? { token: process.env.GITHUB_TOKEN } : {}),
-        repos: (process.env.GITHUB_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean),
-      })
-    : undefined;
-
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.all([core.stop(), github?.stop(), debug?.stop(), status?.stop()]).finally(() => process.exit(0));
+    void Promise.all([core.stop(), debug?.stop(), status?.stop()]).finally(() => process.exit(0));
   });
 }
 
 await core.start();
-await github?.start();
 await debug?.start();
 console.log("agent-core started");

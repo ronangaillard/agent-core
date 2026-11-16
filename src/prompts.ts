@@ -20,7 +20,7 @@ export const DEFAULT_PROMPTS: Record<string, string> = {
   "ask-new": "The last {{count}} message(s) are new: answer them.",
   "ask-late": "Some messages arrived while you were away: take it into account.",
   "ask-event":
-    "Something happened, it is not a message from someone:\n<event>\n{{event}}\n</event>\nAct on it in this conversation (tell the people concerned), or say nothing.",
+    "Something happened, it is not a message from someone:\n<event>\n{{event}}\n</event>\nAct on it as your memory and instructions say: in this conversation if people read it, or with your tools (tell the people concerned), or do nothing.",
   "ask-draft":
     "The last message mentions {{owner}}, not you. Write the reply {{owner}} would send, in the first person, as {{owner}} and not as you: it is posted in their name, only once they have read and approved it. If nothing calls for an answer from {{owner}}, write nothing.",
   "code-task":

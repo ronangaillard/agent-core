@@ -45,6 +45,8 @@ export type CoreConfig = {
   ownerName: string;
   /** A human mentions the owner where the agent would not speak: draft his reply, held for him, sent in his name. */
   draftForOwner: boolean;
+  /** Connectors whose events act with the owner's rights: sources the owner configured (e.g. github). Never chat ones. */
+  ownerSources: string[];
   /** Engagement mode per place (mode_key), and the default. */
   modes: Record<string, Mode>;
   defaultMode: Mode;
@@ -89,6 +91,7 @@ export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
   maxRemindersPerThread: 5,
   ownerName: "the owner",
   draftForOwner: false,
+  ownerSources: [],
   repos: [],
   maxTaskResumes: 2,
   taskNoteGapMs: 2 * 60_000,
@@ -549,7 +552,9 @@ export class Core {
       const address = threadOf(row.address);
       return connector ? { connector, address } : "No such message.";
     }
-    const connector = this.connectors.get(context.connector);
+    // A person: found by this conversation's connector, else by the first that knows people (from GitHub, Slack).
+    const here = this.connectors.get(context.connector);
+    const connector = here?.resolve ? here : [...this.connectors.values()].find((c) => c.resolve);
     const address = await connector?.resolve?.(to);
     return connector && address ? { connector, address } : `Nobody named ${to}.`;
   }
@@ -760,7 +765,8 @@ export class Core {
     if (row.caught_up) {
       const seen = this.store.lastDeliveredAt(row.thread_key);
       if (seen && row.sent_at < seen) return "ignored";
-      if (Date.now() - Date.parse(row.sent_at) > this.config.catchUpStaleMs && !row.dm && !row.mentions_agent) return "ignored";
+      // Chatter heard too late is let go; an event (a deployment, a run) is not: it still asks for something.
+      if (Date.now() - Date.parse(row.sent_at) > this.config.catchUpStaleMs && !row.dm && !row.mentions_agent && row.author_kind !== "system") return "ignored";
     }
     const kept = await this.engaged(row);
     if (!kept) return this.config.draftForOwner && row.mentions_owner && row.author_kind === "human" && row.author_id !== this.config.ownerId ? "draft" : "ignored";
@@ -1016,7 +1022,12 @@ export class Core {
   private scopeOf(lot: InboxRecord[]): Scope {
     const last = lot[lot.length - 1]!;
     return {
-      owner: lot.every((row) => row.author_kind === "human" && row.owner_only && row.author_id === this.config.ownerId),
+      // The owner, or the events of a connector the owner configured to act for him (ownerSources): his rights.
+      owner: lot.every(
+        (row) =>
+          (row.author_kind === "human" && row.owner_only && row.author_id === this.config.ownerId) ||
+          (row.author_kind === "system" && this.config.ownerSources.includes(row.connector)),
+      ),
       requester: last.author_id,
       private: lot.some((row) => row.private),
     };
@@ -1081,7 +1092,7 @@ export class Core {
       lot,
       posts,
       held,
-      { input: lot.map((row) => (row.author_kind === "system" ? (row.text ?? "") : (said(row)?.text ?? ""))).join("\n"), output: texts.join("\n"), author, place: thread.label, ...(reaction ? { reaction: reaction.reaction.trim() } : {}), ...(draft ? { for_owner: true } : held ? { held: true } : {}) },
+      { input: lot.map((row) => (row.author_kind === "system" ? (row.text ?? "") : (said(row)?.text ?? ""))).join("\n"), output: texts.join("\n"), author, place: thread.label, ...(!texts.length && formed.note ? { note: formed.note } : {}), ...(reaction ? { reaction: reaction.reaction.trim() } : {}), ...(draft ? { for_owner: true } : held ? { held: true } : {}) },
       {
         ...(draft ? { outcome: "to_owner" } : {}),
         ...(this.config.ownerAddress

@@ -42,7 +42,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/owner.ts` | The owner's commands: `held`, `send <n>`, `send <n>: <text>`, `drop <n>`, `help` |
 | `src/connectors/slack.ts` | The Slack connector (Socket Mode) |
 | `src/connectors/email.ts` | The e-mail connector (Resend: signed webhook in, API out) |
-| `src/sources/github.ts` | GitHub deployments: a signed webhook, and a pass at start for what was missed |
+| `src/connectors/github.ts` | GitHub as a read-only connector: a conversation per repository, its finished deployments and watched workflow runs as events |
 | `src/debug.ts` | A web view behind a password: the tables (read-only), the prompts and the memory (read and edited) |
 | `src/main.ts` | Startup |
 
@@ -84,9 +84,16 @@ store writes, plus two moments it does not write (a model or a tool starting); t
 repository, never what a message says. A moment with nothing after it falls back to `idle` (or `coding` while a code
 task runs) after 2 minutes. Meant to be reached through a tunnel (Cloudflare) by `devices/m5stick`.
 
-GitHub deployments (off unless both are set): `GITHUB_WEBHOOK_SECRET`, `GITHUB_DEPLOY_CHANNEL`; optional
-`GITHUB_WEBHOOK_PORT` (default 8787), `GITHUB_TOKEN` and `GITHUB_REPOS` (comma-separated, for the pass at start).
-The webhook takes the `deployment_status` event; only final states count, once per deployment.
+GitHub (off without `GITHUB_WEBHOOK_SECRET`): a connector of its own, read-only. Each repository is a conversation
+(`github:<owner>/<repo>`) where events arrive, from a signed webhook (`GITHUB_WEBHOOK_PORT`, default 8787, any path)
+and from the standard catch-up (`GITHUB_TOKEN`, `GITHUB_REPOS`): a `deployment_status` in a final state, once per
+deployment; with `GITHUB_WORKFLOWS` (workflow names, e.g. `Deploy to production`), a watched workflow's run that ends
+on the default branch (success, failure, timed out, startup failure; cancelled says nothing), once per run attempt.
+An event's text holds only facts GitHub guarantees (ids, commit, states, logins, links), never free text written by
+others; `read()` gives the repository's recent events. Nobody reads there: the form has no message and `deliver`
+refuses, so the agent acts with its tools (GitHub's MCP server to read, `send` to tell someone) or does nothing, as
+its memory says. Its events are private and act with the owner's rights (`ownerSources`: he configured this source);
+a person named in `send` is found by the first connector that knows people (Slack).
 
 Code tasks (off unless all are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separated, the first is the default),
 `STEVE_APERCU_URL` and `STEVE_APERCU_TOKEN` (the workshop where each session runs); `GITHUB_TOKEN_<OWNER>` for
