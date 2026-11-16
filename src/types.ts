@@ -136,7 +136,16 @@ export type Rule = "all" | "owner";
  * Where the tool is called from: the rights, the conversation, the lot being answered. sent: the sends of this run,
  * per place (the n-th send to a place in a lot has its own key, the same in a re-run).
  */
-export type ToolContext = { scope: Scope; threadKey: string; lotIds: number[]; connector: string; address: Address; sent?: Map<string, number> };
+export type ToolContext = {
+  scope: Scope;
+  threadKey: string;
+  lotIds: number[];
+  connector: string;
+  address: Address;
+  sent?: Map<string, number>;
+  /** The memory files read in this run: one not read is never overwritten blind. */
+  read?: Set<string>;
+};
 
 export type ToolDef = {
   name: string;

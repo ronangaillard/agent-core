@@ -1073,7 +1073,7 @@ export class Core {
       .join("\n\n");
     const schema = connector.form.schema(last, scope);
     // A draft acts on nothing: the owner has not approved anything yet.
-    const bound = bind(draft ? this.tools.filter((tool) => !tool.effect) : this.tools, { scope, threadKey: last.thread_key, lotIds: lot.map((row) => row.id), connector: last.connector, address: last.address, sent: new Map() });
+    const bound = bind(draft ? this.tools.filter((tool) => !tool.effect) : this.tools, { scope, threadKey: last.thread_key, lotIds: lot.map((row) => row.id), connector: last.connector, address: last.address, sent: new Map(), read: new Set() });
     const tools = bound.map((tool) => this.traced(tool, last));
     const output = schema.parse(await this.think(this.options.brain, { system: instructions, prompt, schema, tools }, { model: draft ? "draft" : "reply", row: last }));
     if (this.stopped) return;

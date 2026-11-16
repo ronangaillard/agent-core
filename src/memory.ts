@@ -63,16 +63,22 @@ export class Memory {
       .join("\n\n");
   }
 
-  read(path: string, scope: Scope): string {
+  read(path: string, scope: Scope, seen?: Set<string>): string {
     const { file } = this.resolve(path, scope);
+    seen?.add(file);
     return existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : "";
   }
 
   /** What is in memory comes up in every prompt as trusted: by default, only the owner's conversation writes it. */
-  write(path: string, content: string, scope: Scope) {
+  write(path: string, content: string, scope: Scope, seen?: Set<string>) {
     if (this.writers === "owner" && !scope.owner) throw new Error(`${path}: only the owner's conversation writes the memory`);
     const { file, shelf } = this.resolve(path, scope);
     if (shelf) throw new Error(`${path}: a read-only folder`);
+    // The whole file is replaced: one not read in this run would lose what the model never saw.
+    if (seen && !seen.has(file) && existsSync(file) && readFileSync(file, "utf8").trim()) {
+      throw new Error(`${path} already exists and you have not read it: memory_read it first, then write its whole new content, keeping what still holds`);
+    }
+    seen?.add(file);
     mkdirSync(dirname(file), { recursive: true });
     // Whole or not at all: a crash mid-write must not leave a truncated INDEX.md going into every prompt.
     const temp = `${file}.${process.pid}.tmp`;
@@ -106,17 +112,17 @@ export class Memory {
         description: `Read one of your memory files, e.g. common/people/paul.md.${also}`,
         input: { path: z.string() },
         rules: ["all"],
-        run: async (args, { scope }) => this.read(String(args.path), scope) || "(empty or missing)",
+        run: async (args, { scope, read }) => this.read(String(args.path), scope, read) || "(empty or missing)",
       },
       {
         name: "memory_write",
         description:
-          "Write a memory file (whole content). common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
+          "Write a memory file (whole content: it replaces the file, so read an existing file first and keep what still holds). common/ comes up in every conversation; private/ only in the owner's private one. Keep INDEX.md short: it is in every prompt.",
         input: { path: z.string(), content: z.string() },
         rules: [this.writers],
         effect: true,
-        run: async (args, { scope }) => {
-          this.write(String(args.path), String(args.content), scope);
+        run: async (args, { scope, read }) => {
+          this.write(String(args.path), String(args.content), scope, read);
           return "written";
         },
       },

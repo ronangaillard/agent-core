@@ -148,6 +148,19 @@ test("tools: the model only sees what the scope allows, and each tool checks aga
   await assert.rejects(() => prod!.run({}), /not allowed/);
 });
 
+test("memory: an existing file is never overwritten unread in a run; a new one, or one read first, is", () => {
+  const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")));
+  writeFileSync(join(memory.root, "common", "rules.md"), "who to tell after a deploy");
+  const run = new Set<string>();
+  assert.throws(() => memory.write("common/rules.md", "a note", owner, run), /have not read it/);
+  assert.equal(memory.read("common/rules.md", owner), "who to tell after a deploy", "the file is untouched");
+  memory.write("common/new.md", "fresh", owner, run);
+  memory.write("common/new.md", "fresh, again", owner, run);
+  assert.equal(memory.read("common/rules.md", owner, run), "who to tell after a deploy");
+  memory.write("common/rules.md", "who to tell after a deploy\na note", owner, run);
+  assert.match(memory.read("common/rules.md", owner), /a note/);
+});
+
 test("memory: private/ only for the owner, nothing outside the memory", () => {
   const memory = new Memory(mkdtempSync(join(tmpdir(), "memory-")));
   writeFileSync(join(memory.root, "common", "INDEX.md"), "team notes");
