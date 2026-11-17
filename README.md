@@ -86,7 +86,7 @@ store writes, plus two moments it does not write (a model or a tool starting); t
 repository, never what a message says. A moment with nothing after it falls back to `idle` (or `coding` while a code
 task runs) after 2 minutes. Meant to be reached through a tunnel (Cloudflare) by `devices/m5stick`.
 
-Pals Office (off without `PALS_TOKEN`; `PALS_URL`, default `https://pals.ronangaillard.com`): the same status, posted
+Pals Office (off unless `PALS_URL` and `PALS_TOKEN` are set): the same status, posted
 as signals to `<url>/api/presence` with the pal token. Every moment is a `prompt` with a short status (`Lit un message
 Slack`, `Utilise <tool>`, `Code sur <repo>`; never what a message says), a minute of `idle` a `stop`, a `heartbeat`
 every 2 minutes, `session_end` on SIGTERM. A failed signal is logged, once per distinct error, and nothing else.

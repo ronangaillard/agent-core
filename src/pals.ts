@@ -1,4 +1,4 @@
-import type { Status, StatusFeed } from "./status.ts";
+import type { Status, StatusFeed, StatusSink } from "./status.ts";
 
 /** He goes idle in the office after this long without a moment. */
 const QUIET_MS = 60_000;
@@ -28,8 +28,8 @@ const label = (s: Status): string => {
  * to /api/presence. `prompt` with a status at every moment (at his desk, a bubble), `stop` once quiet (he wanders),
  * a heartbeat while running, `session_end` when it stops. The office does the rest.
  */
-export function palsPresence(options: { feed: StatusFeed; token: string; url?: string; fetch?: typeof fetch }) {
-  const url = `${options.url ?? "https://pals.ronangaillard.com"}/api/presence`;
+export function palsPresence(options: { feed: StatusFeed; token: string; url: string; fetch?: typeof fetch }): StatusSink {
+  const url = `${options.url}/api/presence`;
   const post = options.fetch ?? fetch;
   let lastError = "";
   // One at a time, in order: a `stop` never overtakes the `prompt` before it.

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import type { Activity, Store } from "./store.ts";
 
 /**
@@ -8,6 +8,9 @@ import type { Activity, Store } from "./store.ts";
  */
 export type StatusState = "idle" | "received" | "thinking" | "tool" | "writing" | "coding";
 export type Status = { state: StatusState; detail?: string; tasks: number; at: string };
+
+/** Whatever shows the status (a small screen, the Pals Office): it watches a StatusFeed and stops with the agent. */
+export type StatusSink = { stop(): Promise<void> };
 
 /** A moment with nothing after it falls back to the ground state (a run cut short, a silent triage). */
 const SETTLE_MS = 120_000;
@@ -100,7 +103,7 @@ const sameSecret = (given: string, expected: string) => {
  * GET /status: the status as Server-Sent Events (one `status` event at once, then one per change), for a screen
  * that shows what the agent does. Bearer token; meant to be reached through a tunnel. No polling: pushed.
  */
-export function statusServer(options: { feed: StatusFeed; port: number; token: string; host?: string }) {
+export function statusServer(options: { feed: StatusFeed; port: number; token: string; host?: string }): StatusSink & { server: Server } {
   const streams = new Set<ServerResponse>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://local");

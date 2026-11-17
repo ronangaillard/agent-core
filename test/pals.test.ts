@@ -77,7 +77,7 @@ test("pals: a failure is logged once per distinct message, and never thrown", as
   const errors = t.mock.method(console, "error", () => {});
   let status = 500;
   const fakeFetch = (async () => new Response("down", { status })) as typeof fetch;
-  const pals = palsPresence({ feed: new StatusFeed(new Store(openDb(freshDb()))), token: "tok", fetch: fakeFetch });
+  const pals = palsPresence({ feed: new StatusFeed(new Store(openDb(freshDb()))), token: "tok", url: "http://office", fetch: fakeFetch });
   t.mock.timers.tick(120_000);
   t.mock.timers.tick(120_000);
   for (let i = 0; i < 30; i++) await Promise.resolve(); // the stop and two heartbeats, all refused the same way

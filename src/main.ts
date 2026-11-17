@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeBrain } from "./claude.ts";
 import { mcpTools, type McpServerConfig } from "./mcp.ts";
-import { StatusFeed, statusServer } from "./status.ts";
+import { StatusFeed, statusServer, type StatusSink } from "./status.ts";
 import { emailConnector } from "./connectors/email.ts";
 import { githubConnector } from "./connectors/github.ts";
 import { debugServer } from "./debug.ts";
@@ -158,21 +158,16 @@ const core = new Core({
 /** What the agent is doing now, folded once for those who show it: the small screen, the Pals Office. */
 const feed = new StatusFeed(core.store);
 
-/** The live status for a small screen (devices/m5stick), off unless both are set: GET /status, Server-Sent Events. */
-const status =
-  process.env.AGENT_STATUS_PORT && process.env.AGENT_STATUS_TOKEN
-    ? statusServer({ feed, port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN })
-    : undefined;
-
-/** The agent in the Pals Office, off without its pal token. */
-const pals =
-  process.env.PALS_TOKEN
-    ? palsPresence({ feed, token: process.env.PALS_TOKEN, ...(process.env.PALS_URL ? { url: process.env.PALS_URL } : {}) })
-    : undefined;
+const sinks: StatusSink[] = [];
+// The live status for a small screen (devices/m5stick), off unless both are set: GET /status, Server-Sent Events.
+if (process.env.AGENT_STATUS_PORT && process.env.AGENT_STATUS_TOKEN)
+  sinks.push(statusServer({ feed, port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN }));
+// The agent in the Pals Office, off unless both are set.
+if (process.env.PALS_URL && process.env.PALS_TOKEN) sinks.push(palsPresence({ feed, url: process.env.PALS_URL, token: process.env.PALS_TOKEN }));
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.all([core.stop(), debug?.stop(), status?.stop(), pals?.stop()]).finally(() => process.exit(0));
+    void Promise.all([core.stop(), debug?.stop(), ...sinks.map((sink) => sink.stop())]).finally(() => process.exit(0));
   });
 }
 
