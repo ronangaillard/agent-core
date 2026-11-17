@@ -17,6 +17,7 @@ export function actTools(core: Core): ToolDef[] {
       input: { to: z.string().describe("A destination, a person, or message:<id>"), text: z.string().min(1) },
       rules: ["all"],
       effect: true,
+      recorded: true,
       run: (args, context) => core.send(context, String(args.to), String(args.text)),
     },
     {
@@ -61,6 +62,7 @@ export function actTools(core: Core): ToolDef[] {
       },
       rules: ["all"],
       effect: true,
+      recorded: true,
       run: async (args, context) => {
         const at = Date.parse(String(args.at));
         if (Number.isNaN(at)) return "Invalid date: give an ISO 8601 date-time with its offset.";

@@ -478,3 +478,34 @@ test("a lot that arrived while the previous reply was leaving: the run sees that
   assert.equal(played, 1);
   core.kill();
 });
+
+test("the gate is asked about one message, marked [new], even when later ones follow it; a reply the read shows is not listed again", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const gatePrompts: string[] = [];
+  const gate: Brain = async ({ prompt }) => (gatePrompts.push(prompt), { speak: false });
+  const core = makeCore(freshDb(), connector, echoBrain().brain, { modes: { "fake:chan": "triage" } }, { gate });
+  const first = world.say("first remark", { thread: "chan", dm: false, author: "paul", ownerOnly: false });
+  world.say("a later one", { thread: "chan", dm: false, author: "anne", ownerOnly: false });
+  await core.start();
+  core.ingest(first, "fake");
+  await waitFor(() => gatePrompts.length === 1);
+  assert.match(gatePrompts[0]!, /^\[new\] .*paul: first remark$/m);
+  assert.match(gatePrompts[0]!, /^\[[^\]]+\] anne: a later one$/m);
+  assert.match(gatePrompts[0]!, /answer the message marked \[new\]\?/);
+  core.kill();
+
+  const prompts: string[] = [];
+  const brain: Brain = async ({ prompt }) => (prompts.push(prompt), { messages: prompts.length === 1 ? ["hello there"] : [] });
+  const world2 = new World();
+  const connector2 = new FakeConnector(world2);
+  const core2 = makeCore(freshDb(), connector2, brain);
+  await core2.start();
+  core2.ingest(world2.say("hi"), "fake");
+  await waitFor(() => connector2.sent.length === 1);
+  core2.ingest(world2.say("again"), "fake");
+  await waitFor(() => prompts.length === 2);
+  assert.match(prompts[1]!, /hello there/);
+  assert.doesNotMatch(prompts[1]!, /posted here/);
+  core2.kill();
+});

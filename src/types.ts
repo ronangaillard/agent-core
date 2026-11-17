@@ -154,6 +154,8 @@ export type ToolDef = {
   rules: Rule[];
   /** It changes something beyond reading (posts, writes, starts): a draft for the owner never gets it. */
   effect?: boolean;
+  /** It records what it did itself (the send before posting, the reminder): not recorded again after it ran. */
+  recorded?: boolean;
   run(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 };
 
@@ -164,7 +166,7 @@ export type ToolResult = string | { text: string; image: { data: string; mime: s
 export type SharedFile = { name: string; mime: string; data: Buffer };
 
 /** A tool bound to one respond(): its context is fixed, the model only gives the arguments. */
-export type BoundTool = { name: string; description: string; input: z.ZodRawShape; effect?: boolean; run(args: Record<string, unknown>): Promise<ToolResult> };
+export type BoundTool = { name: string; description: string; input: z.ZodRawShape; effect?: boolean; recorded?: boolean; run(args: Record<string, unknown>): Promise<ToolResult> };
 
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
 /** signal: aborted when the core stops waiting (its deadline); a brain should then stop its work too. */

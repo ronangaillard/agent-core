@@ -16,6 +16,7 @@ export function bind(tools: readonly ToolDef[], context: ToolContext): BoundTool
       description: tool.description,
       input: tool.input,
       ...(tool.effect ? { effect: true } : {}),
+      ...(tool.recorded ? { recorded: true } : {}),
       run: async (args) => {
         if (!allows(tool.rules, context.scope)) throw new Error(`${tool.name}: not allowed here`);
         return tool.run(args, context);

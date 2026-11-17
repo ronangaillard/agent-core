@@ -14,8 +14,6 @@ import { TransientError, type Address, type BoundTool, type Brain, type Button, 
 const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const IMAGE_MAX = 5_000_000;
 
-/** These tools write their own acted event (before the call, or with the reminder). */
-const SELF_ACTED = new Set(["send", "set_reminder"]);
 /** How long before a lot a post of the agent may still be missing from the connector's read. */
 const READ_LAG_MS = 60_000;
 const brief = (text: string, max: number) => {
@@ -846,13 +844,15 @@ export class Core {
 
   private async ask(gate: Brain, connector: Connector, row: InboxRecord): Promise<boolean> {
     const thread = await connector.read(row.address);
-    const transcript = thread.messages.slice(-15).map(asRead).join("\n");
+    // The message asked about, marked: later ones may follow it (a lot, a read that goes on).
+    const asked = thread.messages.find((m) => m.at === row.sent_at) ?? thread.messages.at(-1);
+    const transcript = thread.messages.slice(-15).map((m) => `${m === asked ? "[new] " : ""}${asRead(m)}`).join("\n");
     // A connector that cannot react is never offered to.
     const schema = connector.reacts ? gateReactSchema : gateSchema;
     const output = schema.parse(
       await this.think(gate, {
         system: [this.prompts.text("gate", { label: thread.label }), connector.reacts ? this.prompts.text("gate-react") : "", this.prompts.text("persona")].filter(Boolean).join("\n\n"),
-        prompt: `<conversation>\n${transcript}\n</conversation>\n\nShould the agent answer the last message?`,
+        prompt: `<conversation>\n${transcript}\n</conversation>\n\nShould the agent answer the message marked [new]?`,
         schema,
       }, { model: "gate", row }),
     ) as { speak: boolean; reaction?: string };
@@ -1010,7 +1010,7 @@ export class Core {
           const text = typeof result === "string" ? result : `${result.text} [image ${result.image.mime}]`;
           record(text, true);
           // An effect that happened is told to the next runs of this conversation: never done twice.
-          if (tool.effect && !SELF_ACTED.has(tool.name)) this.store.act(row.thread_key, row.private, row.id, tool.name, `${tool.name} ${brief(JSON.stringify(args), 200)} → ${brief(text, 120)}`);
+          if (tool.effect && !tool.recorded) this.store.act(row.thread_key, row.private, row.id, tool.name, `${tool.name} ${brief(JSON.stringify(args), 200)} → ${brief(text, 120)}`);
           return result;
         } catch (error) {
           record(error instanceof Error ? error.message : String(error), false);
@@ -1082,7 +1082,9 @@ export class Core {
     const elsewhere = digest(this.store, last.thread_key, scope, this.privacy);
     // Its own posts since the lot began (and just before): the read may lag, or stop before them.
     const since = new Date(Math.min(...lot.map((row) => Date.parse(row.sent_at))) - READ_LAG_MS).toISOString();
-    const acted = [...this.store.acted(last.thread_key), ...this.store.posted(last.thread_key, since).map((text) => `posted here: «${brief(text, 300)}»`)];
+    // Those the read already shows are left out: said once is enough.
+    const shown = (text: string) => thread.messages.some((m) => brief(m.text, 80) === brief(text, 80));
+    const acted = [...this.store.acted(last.thread_key), ...this.store.posted(last.thread_key, since).filter((text) => !shown(text)).map((text) => `posted here: «${brief(text, 300)}»`)];
     const going = inProgress(this.store, scope, this.privacy, last.thread_key, this.taskSteps);
     const ask = system
       ? this.prompts.text("ask-event", { event: last.text ?? "" })
