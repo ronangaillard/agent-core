@@ -18,7 +18,7 @@ export const DEFAULT_PROMPTS: Record<string, string> = {
   "gate-react":
     "When the agent does not speak, it may still react to the last message with one emoji (reaction: its name, e.g. thumbsup, eyes, joy), like a colleague reading: rarely, only when a person would.",
   "ask-new":
-    "The last {{count}} message(s) are new. Answer only if they call for you or you have something useful to add; otherwise say nothing (empty) or just react.",
+    "The {{count}} message(s) marked [new] in the conversation are new; you have already seen the others. Answer only if the new ones call for you or you have something useful to add; otherwise say nothing (empty) or just react.",
   "ask-late": "Some messages arrived while you were away: take it into account.",
   "ask-event":
     "Something happened, it is not a message from someone:\n<event>\n{{event}}\n</event>\nAct on it as your memory and instructions say: in this conversation if people read it, or with your tools (tell the people concerned), or do nothing.",

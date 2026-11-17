@@ -11,7 +11,7 @@ import { Memory } from "../src/memory.ts";
 import { ownerCommands } from "../src/owner.ts";
 import { Prompts } from "../src/prompts.ts";
 import { Store } from "../src/store.ts";
-import { TransientError, type Address, type Brain, type DeliverResult, type Post, type Scope } from "../src/types.ts";
+import { TransientError, type Address, type Brain, type DeliverResult, type Post, type Scope, type ToolDef } from "../src/types.ts";
 import { echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
 
 const colleague: Scope = { owner: false, requester: "ines", private: false };
@@ -304,7 +304,7 @@ test("prompts: files written with their defaults, read at every use, edits apply
   assert.match(systems[1]!, /pirate/);
   core.kill();
   // {{name}} filled, an edited file kept at the next start.
-  assert.equal(new Prompts(dir).text("ask-new", { count: 3 }), "The last 3 message(s) are new. Answer only if they call for you or you have something useful to add; otherwise say nothing (empty) or just react.");
+  assert.equal(new Prompts(dir).text("ask-new", { count: 3 }), "The 3 message(s) marked [new] in the conversation are new; you have already seen the others. Answer only if the new ones call for you or you have something useful to add; otherwise say nothing (empty) or just react.");
   assert.equal(readFileSync(join(dir, "persona.md"), "utf8"), "You are Steve.");
 });
 
@@ -437,4 +437,44 @@ test("slack text: mentions by name, links and channels by label, entities decode
     unslack("<@U0AB12CD> see <#C0123|general> and <https://x.dev/a|the doc> or <https://y.dev> &lt;3 <!here>", (id) => names[id] ?? id),
     "@Paul see #general and the doc (https://x.dev/a) or https://y.dev <3 @here",
   );
+});
+
+test("a lot that arrived while the previous reply was leaving: the run sees that reply, the effect, and which messages are new", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const prompts: string[] = [];
+  let played = 0;
+  const play: ToolDef = { name: "play", description: "Play a word.", input: {}, rules: ["all"], effect: true, run: async (args) => (played++, `played ${String(args.word)}, 20 pts`) };
+  const look: ToolDef = { name: "look", description: "Read the board.", input: {}, rules: ["all"], run: async () => "board" };
+  const brain: Brain = async ({ prompt, tools = [] }) => {
+    prompts.push(prompt);
+    if (prompts.length > 1) return { messages: [] };
+    await tools.find((t) => t.name === "look")!.run({});
+    await tools.find((t) => t.name === "play")!.run({ word: "JEUX" });
+    // Posted during the run: the head of the next lot.
+    core.ingest(world.say("I played ETOILE, your turn", { author: "reginald" }), "fake");
+    return { messages: ["JEUX in M8, your turn Reginald."] };
+  };
+  // The reply is delivered, but the read does not show it yet; meanwhile the thread goes on.
+  connector.deliverImpl = async () => {
+    world.say("nice game", { author: "bystander" });
+    core.ingest(world.say("a remark", { author: "aurelien" }), "fake");
+    return { ok: true, ref: "r1", sent_at: new Date().toISOString() };
+  };
+  const core = makeCore(freshDb(), connector, brain, {}, { tools: [play, look] });
+  await core.start();
+  core.ingest(world.say("go on"), "fake");
+  await waitFor(() => prompts.length === 2);
+  const [first, second] = prompts as [string, string];
+  assert.match(first, /^\[new\] .*ronan: go on$/m);
+  assert.match(first, /The 1 message\(s\) marked \[new\]/);
+  assert.doesNotMatch(first, /You already did/);
+  // The effect and the reply, even though the transcript does not hold the reply; a read (look) is not an action.
+  assert.match(second, /You already did.*\n- play \{"word":"JEUX"\} → played JEUX, 20 pts\n- posted here: «JEUX in M8, your turn Reginald\.»/);
+  assert.doesNotMatch(second, /- look/);
+  // The lot's two messages are the new ones, not the last two.
+  assert.deepEqual(second.split("\n").filter((line) => line.startsWith("[new] ")).map((line) => line.replace(/^.*\] /, "")), ["reginald: I played ETOILE, your turn", "aurelien: a remark"]);
+  assert.match(second, /The 2 message\(s\) marked \[new\]/);
+  assert.equal(played, 1);
+  core.kill();
 });

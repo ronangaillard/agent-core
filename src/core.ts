@@ -14,6 +14,14 @@ import { TransientError, type Address, type BoundTool, type Brain, type Button, 
 const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const IMAGE_MAX = 5_000_000;
 
+/** These tools write their own acted event (before the call, or with the reminder). */
+const SELF_ACTED = new Set(["send", "set_reminder"]);
+/** How long before a lot a post of the agent may still be missing from the connector's read. */
+const READ_LAG_MS = 60_000;
+const brief = (text: string, max: number) => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+};
 /** A message as the models read it: its local time, who, what. */
 const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}: ${m.text}`;
 
@@ -999,7 +1007,10 @@ export class Core {
           this.store.trace("tool", row.thread_key, row.private, row.id, { tool: tool.name, args: cut(JSON.stringify(args)), result: cut(result), ok, ms: Date.now() - started });
         try {
           const result = await tool.run(args);
-          record(typeof result === "string" ? result : `${result.text} [image ${result.image.mime}]`, true);
+          const text = typeof result === "string" ? result : `${result.text} [image ${result.image.mime}]`;
+          record(text, true);
+          // An effect that happened is told to the next runs of this conversation: never done twice.
+          if (tool.effect && !SELF_ACTED.has(tool.name)) this.store.act(row.thread_key, row.private, row.id, tool.name, `${tool.name} ${brief(JSON.stringify(args), 200)} → ${brief(text, 120)}`);
           return result;
         } catch (error) {
           record(error instanceof Error ? error.message : String(error), false);
@@ -1061,17 +1072,23 @@ export class Core {
     const scope = this.scopeOf(lot);
     void connector.typing?.(last.address).catch(() => undefined);
     const thread = await connector.read(last.address);
-    const transcript = thread.messages.map(asRead).join("\n");
+    const said = (row: InboxRecord) => thread.messages.find((m) => m.at === row.sent_at);
+    // The lot's messages, found by their date; a connector whose dates do not match: the last ones, as many.
+    const found = new Set(lot.map(said).filter(Boolean));
+    const system = last.author_kind === "system";
+    const fresh = found.size || system ? found : new Set(thread.messages.slice(-lot.length));
+    const transcript = thread.messages.map((m) => `${fresh.has(m) ? "[new] " : ""}${asRead(m)}`).join("\n");
     const late = lot.some((row) => row.caught_up) ? `\n${this.prompts.text("ask-late")}` : "";
     const elsewhere = digest(this.store, last.thread_key, scope, this.privacy);
-    const acted = this.store.acted(last.thread_key);
+    // Its own posts since the lot began (and just before): the read may lag, or stop before them.
+    const since = new Date(Math.min(...lot.map((row) => Date.parse(row.sent_at))) - READ_LAG_MS).toISOString();
+    const acted = [...this.store.acted(last.thread_key), ...this.store.posted(last.thread_key, since).map((text) => `posted here: «${brief(text, 300)}»`)];
     const going = inProgress(this.store, scope, this.privacy, last.thread_key, this.taskSteps);
-    const system = last.author_kind === "system";
     const ask = system
       ? this.prompts.text("ask-event", { event: last.text ?? "" })
       : draft
         ? this.prompts.text("ask-draft", { owner: this.config.ownerName })
-        : `${this.prompts.text("ask-new", { count: lot.length })}${late}`;
+        : `${this.prompts.text("ask-new", { count: fresh.size })}${late}`;
     const prompt = [
       `Now: ${clock()}.`,
       elsewhere ? `Your other recent conversations (not this one), newest first:\n<elsewhere>\n${elsewhere}\n</elsewhere>` : "",
@@ -1100,7 +1117,6 @@ export class Core {
     const output = schema.parse(await this.think(this.options.brain, { system: instructions, prompt, schema, tools }, { model: draft ? "draft" : "reply", row: last }));
     if (this.stopped) return;
     const formed = connector.form.toPosts(output);
-    const said = (row: InboxRecord) => thread.messages.find((m) => m.at === row.sent_at);
     const author = system ? "event" : (said(last)?.author ?? last.author_id);
     const held = draft || formed.held;
     // A reaction leaves at once or not at all: never held, never in the owner's name, never to a connector that cannot.

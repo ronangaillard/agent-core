@@ -164,7 +164,7 @@ export type ToolResult = string | { text: string; image: { data: string; mime: s
 export type SharedFile = { name: string; mime: string; data: Buffer };
 
 /** A tool bound to one respond(): its context is fixed, the model only gives the arguments. */
-export type BoundTool = { name: string; description: string; input: z.ZodRawShape; run(args: Record<string, unknown>): Promise<ToolResult> };
+export type BoundTool = { name: string; description: string; input: z.ZodRawShape; effect?: boolean; run(args: Record<string, unknown>): Promise<ToolResult> };
 
 /** The model call: a prompt, a schema, a validated object back. Throws TransientError when worth retrying later. */
 /** signal: aborted when the core stops waiting (its deadline); a brain should then stop its work too. */

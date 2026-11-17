@@ -414,7 +414,12 @@ export class Store {
     this.db.prepare("UPDATE outbox SET idem_key = NULL WHERE id = ?").run(id);
   }
 
-  /** What the agent already did from this conversation (sends, reminders), for the prompt of a re-run. */
+  /** An effect tool that succeeded: what the next runs of this conversation are told was already done. */
+  act(threadKey: string, isPrivate: boolean, ref: number | null, tool: string, summary: string) {
+    this.event({ kind: "acted", thread_key: threadKey, private: isPrivate, ref, payload: { tool, summary } });
+  }
+
+  /** What the agent already did from this conversation (sends, effect tools, reminders), for the prompt of the next runs. */
   acted(threadKey: string): string[] {
     const since = new Date(Date.now() - 24 * 3600_000).toISOString();
     const rows = this.db.prepare("SELECT payload FROM events WHERE thread_key = ? AND kind IN ('acted', 'reminder_set') AND at > ? ORDER BY id DESC LIMIT 10").all(threadKey, since) as Row[];
@@ -422,6 +427,22 @@ export class Store {
       const payload = JSON.parse(String(r.payload ?? "{}")) as { summary?: string; note?: string; due_at?: string };
       return payload.summary ?? `reminder set for ${payload.due_at}: ${payload.note}`;
     });
+  }
+
+  /**
+   * The agent's last posts delivered in this thread since a date, oldest first: the connector's read may not show
+   * them yet (it lags, or stops at a message sent before them).
+   */
+  posted(threadKey: string, since: string, limit = 3): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT json_extract(payload, '$.text') AS text FROM outbox
+         WHERE thread_key = ? AND kind IN ('reply', 'send') AND status = 'delivered' AND sent_at >= ?
+           AND json_extract(payload, '$.as') IS NULL AND json_extract(payload, '$.text') IS NOT NULL
+         ORDER BY id DESC LIMIT ?`,
+      )
+      .all(threadKey, since, limit) as Row[];
+    return rows.reverse().map((r) => String(r.text));
   }
 
   inbox(id: number): InboxRecord | undefined {

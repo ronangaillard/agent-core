@@ -48,7 +48,7 @@ test("a burst goes out in a single respond()", async () => {
   await waitFor(() => repliesIn(connector, "t1").length === 1);
   await sleep(100);
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0]!, /The last 3 message/);
+  assert.match(prompts[0]!, /The 3 message\(s\) marked \[new\]/);
   core.kill();
 });
 
@@ -261,7 +261,7 @@ test("a system row is handled alone, never with a human message", async () => {
   await core.start();
   await waitFor(() => repliesIn(connector, "t1").length === 2);
   assert.equal(prompts.length, 2);
-  assert.match(prompts[0]!, /The last 1 message/);
+  assert.match(prompts[0]!, /The 1 message\(s\) marked \[new\]/);
   core.kill();
 });
 
