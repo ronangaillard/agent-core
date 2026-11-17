@@ -13,6 +13,7 @@ import { historyTools } from "./history.ts";
 import { Memory } from "./memory.ts";
 import { DEFAULT_PROMPTS, Prompts } from "./prompts.ts";
 import { ownerCommands } from "./owner.ts";
+import { palsPresence } from "./pals.ts";
 import { apercuWorkshop } from "./runners/apercu.ts";
 import { claudeCodeRunner, tokensFromEnv } from "./runners/claude-code.ts";
 import { Store } from "./store.ts";
@@ -154,15 +155,24 @@ const core = new Core({
   },
 });
 
+/** What the agent is doing now, folded once for those who show it: the small screen, the Pals Office. */
+const feed = new StatusFeed(core.store);
+
 /** The live status for a small screen (devices/m5stick), off unless both are set: GET /status, Server-Sent Events. */
 const status =
   process.env.AGENT_STATUS_PORT && process.env.AGENT_STATUS_TOKEN
-    ? statusServer({ feed: new StatusFeed(core.store), port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN })
+    ? statusServer({ feed, port: Number(process.env.AGENT_STATUS_PORT), token: process.env.AGENT_STATUS_TOKEN })
+    : undefined;
+
+/** The agent in the Pals Office, off without its pal token. */
+const pals =
+  process.env.PALS_TOKEN
+    ? palsPresence({ feed, token: process.env.PALS_TOKEN, ...(process.env.PALS_URL ? { url: process.env.PALS_URL } : {}) })
     : undefined;
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.all([core.stop(), debug?.stop(), status?.stop()]).finally(() => process.exit(0));
+    void Promise.all([core.stop(), debug?.stop(), status?.stop(), pals?.stop()]).finally(() => process.exit(0));
   });
 }
 
