@@ -15,7 +15,7 @@ export type StatusSink = { stop(): Promise<void> };
 /** A moment with nothing after it falls back to the ground state (a run cut short, a silent triage). */
 const SETTLE_MS = 120_000;
 /** A message received is only a blink: then back to what the agent was doing (a run under way), or the ground. */
-const RECEIVED_MS = 4_000;
+const RECEIVED_MS = 2_000;
 /** A comment line now and then, so that a proxy (Cloudflare) keeps an idle stream open. */
 const HEARTBEAT_MS = 25_000;
 

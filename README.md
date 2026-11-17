@@ -90,7 +90,7 @@ Live status (off unless both are set): `AGENT_STATUS_PORT` and `AGENT_STATUS_TOK
 `{"state", "detail", "tasks", "at"}`, and a comment every 25 s for proxies. The state is folded from every event the
 store writes, plus two moments it does not write (a model or a tool starting); the detail is a tool's name or a
 repository, never what a message says. A moment with nothing after it falls back to `idle` (or `coding` while a code
-task runs) after 2 minutes; `received` lasts 4 seconds, then back to what a run under way was doing, or `idle`. Meant to be reached through a tunnel (Cloudflare) by `devices/m5stick`.
+task runs) after 2 minutes; `received` lasts 2 seconds, then back to what a run under way was doing, or `idle`. Meant to be reached through a tunnel (Cloudflare) by `devices/m5stick`.
 
 Pals Office (off unless `PALS_URL` and `PALS_TOKEN` are set): the same status, posted
 as signals to `<url>/api/presence` with the pal token. Every moment is a `prompt` with a short status (`Lit un message

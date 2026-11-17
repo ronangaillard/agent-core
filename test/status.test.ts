@@ -70,10 +70,10 @@ test("status: a message received during a run is a blink, then back to what the 
   emit("tool_start", { tool: "http_get" });
   emit("received");
   assert.equal(feed.now().state, "received");
-  t.mock.timers.tick(4_000);
+  t.mock.timers.tick(2_000);
   assert.deepEqual([feed.now().state, feed.now().detail], ["tool", "http_get"]);
   emit("delivered");
   emit("received");
-  t.mock.timers.tick(4_000);
+  t.mock.timers.tick(2_000);
   assert.equal(feed.now().state, "idle");
 });
