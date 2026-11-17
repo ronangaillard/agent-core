@@ -32,6 +32,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |
 | `src/prompts.ts` | Every text the agent is prompted with, one editable Markdown file each, read at every use |
 | `src/mcp.ts` | Remote MCP servers (`AGENT_MCP_SERVERS`, e.g. Notion): all their tools as the agent's own, bound by rules and traced; a tool not marked read-only is an effect |
+| `src/http.ts` | `http_get` · `http_send`: calls to the APIs listed in `AGENT_HTTP_APIS` only, the token added by the code; sending is an effect |
 | `src/mcp-auth.ts` · `src/mcp-login.ts` | An MCP server's OAuth sign-in: done once by hand in two steps, kept in `AGENT_MCP_AUTH/<name>.json`, refreshed by the client |
 | `src/status.ts` | The live status (`idle`, `received`, `thinking`, `tool`, `writing`, `coding`) folded from the activity, served as Server-Sent Events on `GET /status` |
 | `src/pals.ts` | The agent in the Pals Office: the status turned into presence signals (`prompt`, `stop`, `heartbeat`, `session_end`) |
@@ -78,6 +79,11 @@ with that person's rights): `tsx src/mcp-login.ts notion` in the container print
 service; the browser then fails on `localhost:8976/callback?code=…`, and `tsx src/mcp-login.ts notion '<that address>'`
 finishes. The tokens are kept in `AGENT_MCP_AUTH` (default `data/mcp-auth`, `/data/mcp-auth` in the image) and refreshed;
 the tools load at the next start.
+
+`AGENT_HTTP_APIS` (JSON, name → `{"url", "description", "headers", "rules"}`): the HTTP APIs the agent may call with
+`http_get` and `http_send`, and no other; `${VAR}` in a header is read from the environment, so the model never sees the
+token; the model gives an API name and a path, a path leaving the base URL is refused; e.g.
+`{"pals":{"url":"https://pals.example.com","description":"the Pals Office","headers":{"Authorization":"Bearer ${PALS_TOKEN}"}}}`.
 
 Live status (off unless both are set): `AGENT_STATUS_PORT` and `AGENT_STATUS_TOKEN`. `GET /status` with
 `Authorization: Bearer <token>` streams Server-Sent Events: one `status` event at once, then one at each change,
