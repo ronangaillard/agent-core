@@ -60,3 +60,20 @@ test("status: GET /status streams Server-Sent Events, with a bearer token", asyn
   abort.abort();
   await served.stop();
 });
+
+test("status: a message received during a run is a blink, then back to what the run was doing; alone, back to idle", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const store = new Store(openDb(freshDb()));
+  const feed = new StatusFeed(store);
+  const emit = (kind: string, payload?: unknown) => store.activity.emit("event", { kind, thread_key: "slack:C1:main", payload });
+  emit("thinking", { model: "reply" });
+  emit("tool_start", { tool: "http_get" });
+  emit("received");
+  assert.equal(feed.now().state, "received");
+  t.mock.timers.tick(4_000);
+  assert.deepEqual([feed.now().state, feed.now().detail], ["tool", "http_get"]);
+  emit("delivered");
+  emit("received");
+  t.mock.timers.tick(4_000);
+  assert.equal(feed.now().state, "idle");
+});

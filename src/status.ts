@@ -14,6 +14,8 @@ export type StatusSink = { stop(): Promise<void> };
 
 /** A moment with nothing after it falls back to the ground state (a run cut short, a silent triage). */
 const SETTLE_MS = 120_000;
+/** A message received is only a blink: then back to what the agent was doing (a run under way), or the ground. */
+const RECEIVED_MS = 4_000;
 /** A comment line now and then, so that a proxy (Cloudflare) keeps an idle stream open. */
 const HEARTBEAT_MS = 25_000;
 
@@ -23,6 +25,8 @@ export class StatusFeed {
   private readonly tasks = new Map<number, string>();
   private readonly listeners = new Set<(status: Status) => void>();
   private settle: NodeJS.Timeout | undefined;
+  /** What a run under way is doing (thinking, a tool, writing): where a received blink goes back to. */
+  private working: Status | undefined;
 
   constructor(store: Store) {
     for (const task of store.tasksWith("running")) this.tasks.set(task.id, task.repo);
@@ -49,7 +53,11 @@ export class StatusFeed {
   private set(state: StatusState | "ground", detail?: string) {
     clearTimeout(this.settle);
     const next = state === "ground" ? this.ground() : { state, ...(detail ? { detail } : {}), tasks: this.tasks.size, at: new Date().toISOString() };
-    if (state !== "ground") this.settle = setTimeout(() => this.set("ground"), SETTLE_MS).unref();
+    if (state === "ground") this.working = undefined;
+    else if (state !== "received") this.working = next;
+    if (state === "received") {
+      this.settle = setTimeout(() => (this.working ? this.set(this.working.state, this.working.detail) : this.set("ground")), RECEIVED_MS).unref();
+    } else if (state !== "ground") this.settle = setTimeout(() => this.set("ground"), SETTLE_MS).unref();
     if (next.state === this.current.state && next.detail === this.current.detail && next.tasks === this.current.tasks) return;
     this.current = next;
     for (const listener of this.listeners) listener(next);
