@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeBrain } from "./claude.ts";
+import { httpTools, type HttpApiConfig } from "./http.ts";
 import { mcpTools, type McpServerConfig } from "./mcp.ts";
 import { StatusFeed, statusServer, type StatusSink } from "./status.ts";
 import { emailConnector } from "./connectors/email.ts";
@@ -116,6 +117,12 @@ const mcpServers = JSON.parse(process.env.AGENT_MCP_SERVERS ?? "{}") as Record<s
 const mcp = await mcpTools(mcpServers, { authDir: process.env.AGENT_MCP_AUTH ?? "data/mcp-auth" });
 
 /**
+ * AGENT_HTTP_APIS: the HTTP APIs the agent may call (http_get, http_send), and only those, e.g.
+ * {"pals":{"url":"https://pals.example.com","description":"the Pals Office","headers":{"Authorization":"Bearer ${PALS_TOKEN}"}}}.
+ */
+const http = httpTools(JSON.parse(process.env.AGENT_HTTP_APIS ?? "{}") as Record<string, HttpApiConfig>);
+
+/**
  * The web view: the tables (read-only), and the prompts and the memory (read and edited). Off unless both are set:
  * it shows private conversations and changes what the agent is told.
  */
@@ -137,7 +144,7 @@ const core = new Core({
   gate: claudeBrain({ model: process.env.CLAUDE_GATE_MODEL ?? "haiku", ...executable }),
   memory,
   prompts,
-  tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy }), ...mcp],
+  tools: [...memory.tools(), ...historyTools(new Store(db), { ownerId, on: privacy }), ...mcp, ...http],
   config: {
     ...defaultConfig,
     ownerId,

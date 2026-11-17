@@ -21,7 +21,8 @@ export function transportOf(name: string, server: McpServerConfig, { env = proce
   return new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers }, ...(server.oauth ? { authProvider: new FileAuth(authDir, name) } : {}) });
 }
 
-const expand = (value: string, env: NodeJS.ProcessEnv) =>
+/** ${VAR} in a header, read from the environment: the secret stays out of the config and away from the model. */
+export const expand = (value: string, env: NodeJS.ProcessEnv) =>
   value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name: string) => {
     const found = env[name];
     if (found === undefined) throw new Error(`${name} is not set`);
