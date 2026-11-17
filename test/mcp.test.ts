@@ -15,6 +15,9 @@ async function fakeServer(): Promise<{ url: string; auth: string[]; close: () =>
     mcp.registerTool("search", { description: "Search pages", inputSchema: { query: z.string().describe("words") }, annotations: { readOnlyHint: true } }, async ({ query }) => ({
       content: [{ type: "text", text: `found: ${query}` }],
     }));
+    mcp.registerTool("read-file", { description: "Read a file", inputSchema: { path: z.string() }, annotations: { readOnlyHint: true } }, async ({ path }) => ({
+      content: [{ type: "text", text: "successfully downloaded text file" }, { type: "resource", resource: { uri: `repo://${path}`, mimeType: "text/html", text: "<h1>Reminders</h1>" } }],
+    }));
     mcp.registerTool("create-page", { description: "Create a page", inputSchema: { title: z.string() } }, async ({ title }) =>
       title === "bad" ? { content: [{ type: "text", text: "no rights" }], isError: true } : { content: [{ type: "text", text: `created ${title}` }] },
     );
@@ -34,15 +37,17 @@ test("mcp: a remote server's tools become the agent's, read-only ones without ef
   const tools = await mcpTools({ notion: { url: server.url, headers: { Authorization: "Bearer ${FAKE_TOKEN}" } } }, { env: { FAKE_TOKEN: "t0k" }, log: (line) => logs.push(line) });
   assert.deepEqual(tools.map((t) => [t.name, t.effect, t.rules]), [
     ["search", false, ["all"]],
+    ["read-file", false, ["all"]],
     ["create-page", true, ["all"]],
   ]);
   assert.ok(Object.keys(tools[0]!.input).includes("query"));
   const context = { scope: { owner: false, requester: "paul", private: false }, threadKey: "x", lotIds: [], connector: "fake", address: { connector: "fake", conversation: "c", thread: "main" } };
   assert.equal(await tools[0]!.run({ query: "budget" }, context), "found: budget");
-  assert.equal(await tools[1]!.run({ title: "Notes" }, context), "created Notes");
-  await assert.rejects(tools[1]!.run({ title: "bad" }, context), /no rights/);
+  assert.equal(await tools[1]!.run({ path: "docs/tools.html" }, context), "successfully downloaded text file\nrepo://docs/tools.html:\n<h1>Reminders</h1>");
+  assert.equal(await tools[2]!.run({ title: "Notes" }, context), "created Notes");
+  await assert.rejects(tools[2]!.run({ title: "bad" }, context), /no rights/);
   assert.ok(server.auth.every((a) => a === "Bearer t0k"));
-  assert.match(logs.join("\n"), /mcp notion: 2 tools/);
+  assert.match(logs.join("\n"), /mcp notion: 3 tools/);
   await server.close();
 });
 

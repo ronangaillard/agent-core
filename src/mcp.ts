@@ -75,8 +75,11 @@ export async function mcpTools(servers: Record<string, McpServerConfig>, options
               client = undefined;
               throw error;
             }
-            const content = (result.content ?? []) as { type: string; text?: string; data?: string; mimeType?: string }[];
-            let text = content.flatMap((c) => (c.type === "text" && c.text ? [c.text] : [])).join("\n");
+            const content = (result.content ?? []) as { type: string; text?: string; data?: string; mimeType?: string; resource?: { uri?: string; text?: string } }[];
+            // A file read comes back as an embedded resource (GitHub: "successfully downloaded" as text, the file beside).
+            let text = content
+              .flatMap((c) => (c.type === "text" && c.text ? [c.text] : c.type === "resource" && typeof c.resource?.text === "string" ? [`${c.resource.uri ?? "resource"}:\n${c.resource.text}`] : []))
+              .join("\n");
             if (text.length > TEXT_MAX) text = `${text.slice(0, TEXT_MAX)}\n…(cut)`;
             if (result.isError) throw new Error(text || "the tool failed");
             const image = content.find((c) => c.type === "image" && c.data && c.mimeType);
