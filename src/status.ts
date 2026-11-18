@@ -28,7 +28,7 @@ export class StatusFeed {
   /** What a run under way is doing (thinking, a tool, writing): where a received blink goes back to. */
   private working: Status | undefined;
 
-  constructor(store: Store) {
+  constructor(private readonly store: Store) {
     for (const task of store.tasksWith("running")) this.tasks.set(task.id, task.repo);
     this.current = this.ground();
     store.activity.on("event", (activity) => this.fold(activity));
@@ -65,8 +65,9 @@ export class StatusFeed {
 
   private fold(a: Activity) {
     const payload = (a.payload ?? {}) as { tool?: string; repo?: string; model?: string };
-    if (a.kind === "task_started" && a.ref != null) {
-      this.tasks.set(a.ref, payload.repo ?? "code");
+    // Started, or running again (a task continued after its report): its repository from the store if not told.
+    if ((a.kind === "task_started" || a.kind === "task_running") && a.ref != null) {
+      this.tasks.set(a.ref, payload.repo ?? this.store.task(a.ref)?.repo ?? "code");
       return this.set("ground");
     }
     if (/^task_(waiting|failed|done|abandoned)$/.test(a.kind) && a.ref != null) {

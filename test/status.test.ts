@@ -77,3 +77,12 @@ test("status: a message received during a run is a blink, then back to what the 
   t.mock.timers.tick(2_000);
   assert.equal(feed.now().state, "idle");
 });
+
+test("status: a task running again after its report (continued) shows coding, its repository from the store", () => {
+  const store = new Store(openDb(freshDb()));
+  const feed = new StatusFeed(store);
+  const t = store.createTask({ connector: "fake", address: { connector: "fake", conversation: "a", thread: "main" }, thread_key: "fake:a", title: "fonts", repo: "ronangaillard/pals-office", request: "x", requester: "ronan", owner_asked: true, private: true });
+  store.activity.emit("event", { kind: "task_running", thread_key: "fake:a", ref: t.id });
+  assert.equal(feed.now().state, "coding");
+  assert.equal(feed.now().detail, "pals-office");
+});

@@ -70,6 +70,15 @@ export function claudeBrain(options: { model?: string; executable?: string; maxT
         },
       });
       for await (const message of conversation) {
+        // The tools' server not connected at start: the model would run without its tools and say so. Nothing done
+        // yet, so a later try is safe.
+        if (server && message.type === "system" && message.subtype === "init") {
+          const status = message.mcp_servers.find((s) => s.name === SERVER)?.status ?? "absent";
+          if (status !== "connected") {
+            console.warn(`model: the tools are not connected (${status}), tried again later`);
+            throw new TransientError(`the tools are not connected (${status})`);
+          }
+        }
         if (message.type !== "result") continue;
         onRun?.({ turns: message.num_turns, cost_usd: message.total_cost_usd, ms: message.duration_ms, outcome: message.subtype });
         if (message.subtype !== "success" || message.is_error) {
