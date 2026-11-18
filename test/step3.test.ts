@@ -425,3 +425,18 @@ test("github: a task's pull request closed settles it (merged: done, unmerged: a
   core.kill();
   await github.stop?.();
 });
+
+test("github: a repository is read with its owner's token, else the default one", async () => {
+  const seen: string[] = [];
+  const server = (await import("node:http")).createServer((req, res) => {
+    seen.push(`${req.url} ${req.headers.authorization}`);
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ state: "closed", merged: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as { port: number };
+  const github = githubConnector({ secret: "s", port: 0, api: `http://127.0.0.1:${port}`, token: "work", tokens: { "ronan-g": "perso" }, onPullRequestClosed: () => {} });
+  assert.deepEqual(await github.pullRequest("Ronan-G/pals", 3), { closed: true, merged: true });
+  await github.pullRequest("acme/app", 4);
+  server.close();
+  assert.deepEqual(seen, ["/repos/Ronan-G/pals/pulls/3 Bearer perso", "/repos/acme/app/pulls/4 Bearer work"]);
+});

@@ -95,6 +95,7 @@ const github = process.env.GITHUB_WEBHOOK_SECRET
       secret: process.env.GITHUB_WEBHOOK_SECRET,
       port: Number(process.env.GITHUB_WEBHOOK_PORT ?? 8787),
       ...(process.env.GITHUB_TOKEN ? { token: process.env.GITHUB_TOKEN } : {}),
+      tokens: tokensFromEnv(process.env),
       repos: (process.env.GITHUB_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean),
       workflows: (process.env.GITHUB_WORKFLOWS ?? "").split(",").map((w) => w.trim()).filter(Boolean),
       onPullRequestClosed: (repo, pr, merged) => core.pullRequestClosed(repo, pr, merged),

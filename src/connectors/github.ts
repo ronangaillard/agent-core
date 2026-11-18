@@ -9,6 +9,8 @@ export type GithubOptions = {
   port: number;
   /** For read() and the catch-up: the repositories' recent deployments and runs. */
   token?: string;
+  /** Tokens by repository owner (lower case), used before token for that owner's repositories. */
+  tokens?: Record<string, string>;
   /** The repositories the catch-up reads. */
   repos?: string[];
   /**
@@ -96,9 +98,12 @@ export function githubConnector(options: GithubOptions): Connector & {
   const at = (raw: Raw) => (raw.kind === "deployment" ? raw.status.created_at : raw.run.updated_at) ?? new Date().toISOString();
 
   async function api<T>(path: string): Promise<T> {
+    // The repository owner's token if there is one (GITHUB_TOKEN_<OWNER>), else the default one.
+    const owner = /^\/repos\/([^/]+)\//.exec(path)?.[1]?.toLowerCase();
+    const token = (owner && options.tokens?.[owner]) || options.token;
     const response = await fetch(`${base}${path}`, {
       signal: AbortSignal.timeout(15_000),
-      headers: { authorization: `Bearer ${options.token}`, accept: "application/vnd.github+json", "user-agent": "agent-core" },
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "agent-core" },
     });
     if (!response.ok) throw new Error(`GitHub ${path}: ${response.status}`);
     return (await response.json()) as T;
