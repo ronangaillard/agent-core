@@ -288,7 +288,11 @@ export function slackConnector(options: {
       self.botId = auth.bot_id ?? "";
       await loadMembership();
       app.message(async ({ message }) => sink(message));
-      app.event("app_mention", async ({ event }) => sink(event));
+      // Slack sends a mention only from a channel the bot is in: it proves the join, even one that went unseen.
+      app.event("app_mention", async ({ event }) => {
+        member.set(event.channel, true);
+        sink(event);
+      });
       app.event("member_joined_channel", async ({ event }) => {
         if (event.user === self.userId) member.set(event.channel, true);
       });
