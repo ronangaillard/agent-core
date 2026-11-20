@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { leftChannel, slackMentions, unslack } from "../src/connectors/slack.ts";
+import { leftChannel, slackFormat, slackMentions, unslack } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
 import { debugServer } from "../src/debug.ts";
 import { digest } from "../src/history.ts";
@@ -437,6 +437,15 @@ test("slack text: mentions by name, links and channels by label, entities decode
     unslack("<@U0AB12CD> see <#C0123|general> and <https://x.dev/a|the doc> or <https://y.dev> &lt;3 <!here>", (id) => names[id] ?? id),
     "@Paul see #general and the doc (https://x.dev/a) or https://y.dev <3 @here",
   );
+});
+
+test("slack text: standard Markdown becomes Slack's formatting; Slack's own and code are left alone", () => {
+  assert.equal(
+    slackFormat("**Le changement.** Un commit, voir [la PR](https://github.com/a/b/pull/1).\n## Pas fait\n- ~~Notion~~ et __CI__\n*déjà Slack* et _italique_"),
+    "*Le changement.* Un commit, voir <https://github.com/a/b/pull/1|la PR>.\n*Pas fait*\n- ~Notion~ et *CI*\n*déjà Slack* et _italique_",
+  );
+  assert.equal(slackFormat("`**pas ça**` et\n```\n**ni ça** [x](https://y.dev)\n```\n**mais ça**"), "`**pas ça**` et\n```\n**ni ça** [x](https://y.dev)\n```\n*mais ça*");
+  assert.equal(slackFormat("SNAKE__CASE__NAME, 2 ** 3, a**b"), "SNAKE__CASE__NAME, 2 ** 3, a**b");
 });
 
 test("slack text: the agent's @Name becomes a real mention when one person has that name", () => {

@@ -126,6 +126,27 @@ export function unslack(text: string, name: (id: string) => string): string {
 
 const isoOf = (ts: string) => new Date(Number(ts) * 1000).toISOString();
 
+/**
+ * Standard Markdown the model writes → Slack's mrkdwn: **bold** and __bold__ → *bold*, ~~struck~~ → ~struck~,
+ * [label](url) → <url|label>, a # heading → a bold line. Slack's own *bold* and _italic_ are left as they are; code
+ * (`…` and ``` blocks) is never touched.
+ */
+export function slackFormat(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((piece, i) =>
+      i % 2
+        ? piece
+        : piece
+            .replace(/^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm, (_, title: string) => `*${title.replace(/\*\*(.+?)\*\*/g, "$1")}*`)
+            .replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g, "*$1*")
+            .replace(/(^|[^\w])__(?=\S)([^\n]*?\S)__(?!\w)/g, "$1*$2*")
+            .replace(/~~(?=\S)([^\n]*?\S)~~/g, "~$1~")
+            .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, "<$2|$1>"),
+    )
+    .join("");
+}
+
 const foldName = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 /**
@@ -536,8 +557,9 @@ export function slackConnector(options: {
           // Dated by the message reacted to: what the agent has seen, for the catch-up.
           return { ok: true, ref: address.ts!, sent_at: isoOf(address.ts!) };
         }
-        // "@Name" as a real mention; without the directory, the text as written.
-        const text = await directory().then((people) => slackMentions(post.text, people), () => post.text);
+        // Slack's formatting, and "@Name" as a real mention (without the directory, the names as written).
+        const formatted = slackFormat(post.text);
+        const text = await directory().then((people) => slackMentions(formatted, people), () => formatted);
         const message = {
           ...(asOwner ? { token: options.userToken } : {}),
           channel: address.conversation,
