@@ -126,6 +126,35 @@ export function unslack(text: string, name: (id: string) => string): string {
 
 const isoOf = (ts: string) => new Date(Number(ts) * 1000).toISOString();
 
+const foldName = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * The reverse of unslack for people: "@Name" written by the agent becomes Slack's <@ID>, a real mention, when the name
+ * (a display name, a real name, or a first name) is one person's only. people: their names folded (no accents, lower
+ * case). An address (x@y), a name nobody or several people have: left as written.
+ */
+export function slackMentions(text: string, people: { id: string; names: string[] }[]): string {
+  if (!text.includes("@")) return text;
+  const holders = new Map<string, Set<string>>();
+  for (const person of people)
+    for (const name of person.names)
+      for (const key of new Set([name, name.split(/\s+/)[0]!])) if (key) (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(person.id);
+  // The longest first: "@Marie-Hortense Dupont" before "@Marie-Hortense".
+  const names = [...holders].filter(([, ids]) => ids.size === 1).map(([name, ids]) => [name, [...ids][0]!] as const).sort((a, b) => b[0].length - a[0].length);
+  let out = "";
+  let from = 0;
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    // An address (x@y) or Slack markup (<@…>): not a name.
+    if (at < from || /[\p{L}\p{N}_@<.]/u.test(text.charAt(at - 1))) continue;
+    const rest = text.slice(at + 1, at + 1 + 80);
+    const found = names.find(([name]) => foldName(rest.slice(0, name.length)) === name && !/[\p{L}\p{N}]/u.test(rest.charAt(name.length)));
+    if (!found) continue;
+    out += `${text.slice(from, at)}<@${found[1]}>`;
+    from = at + 1 + found[0].length;
+  }
+  return out + text.slice(from);
+}
+
 /**
  * Slack through Socket Mode. The membership cache is filled at start with the bot token; a miss costs one call.
  * A conversation the bot is not in never becomes a row (the owner's DMs with others included).
@@ -506,15 +535,17 @@ export function slackConnector(options: {
           // Dated by the message reacted to: what the agent has seen, for the catch-up.
           return { ok: true, ref: address.ts!, sent_at: isoOf(address.ts!) };
         }
+        // "@Name" as a real mention; without the directory, the text as written.
+        const text = await directory().then((people) => slackMentions(post.text, people), () => post.text);
         const message = {
           ...(asOwner ? { token: options.userToken } : {}),
           channel: address.conversation,
-          text: post.text,
+          text,
           ...(address.thread !== "main" ? { thread_ts: address.thread } : {}),
         };
         // Never in the owner's name (the bot could not update the post once clicked). Refused blocks: certainly not
         // posted, so the text alone goes, its commands or choices still written in it.
-        const buttons = post.buttons?.length && !asOwner ? withButtons(post.text, post.buttons) : undefined;
+        const buttons = post.buttons?.length && !asOwner ? withButtons(text, post.buttons) : undefined;
         const sent = buttons
           ? await client.chat.postMessage({ ...message, blocks: buttons as never }).catch((error: { data?: { error?: string } }) => {
               if (error.data?.error === "invalid_blocks") return client.chat.postMessage(message);

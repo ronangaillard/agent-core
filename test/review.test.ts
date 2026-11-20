@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { leftChannel, unslack } from "../src/connectors/slack.ts";
+import { leftChannel, slackMentions, unslack } from "../src/connectors/slack.ts";
 import { openDb } from "../src/db.ts";
 import { debugServer } from "../src/debug.ts";
 import { digest } from "../src/history.ts";
@@ -437,6 +437,22 @@ test("slack text: mentions by name, links and channels by label, entities decode
     unslack("<@U0AB12CD> see <#C0123|general> and <https://x.dev/a|the doc> or <https://y.dev> &lt;3 <!here>", (id) => names[id] ?? id),
     "@Paul see #general and the doc (https://x.dev/a) or https://y.dev <3 @here",
   );
+});
+
+test("slack text: the agent's @Name becomes a real mention when one person has that name", () => {
+  const people = [
+    { id: "U1", names: ["ronan", "ronan gaillard"] },
+    { id: "U2", names: ["marie-hortense", "marie-hortense durand"] },
+    { id: "U3", names: ["paul martin"] },
+    { id: "U4", names: ["paul durand"] },
+  ];
+  assert.equal(
+    slackMentions("@Ronan c'est fait. Merci @Marie-Hortense ! Et @Ronan Gaillard, (@ronan).", people),
+    "<@U1> c'est fait. Merci <@U2> ! Et <@U1>, (<@U1>).",
+  );
+  assert.equal(slackMentions("@Paul ou @Paul Durand ?", people), "@Paul ou <@U4> ?", "a first name two people have: left as written");
+  assert.equal(slackMentions("steve@maestro.fr, @here, @Ronanne, <@U9>", people), "steve@maestro.fr, @here, @Ronanne, <@U9>");
+  assert.equal(slackMentions("@Rónan", people), "<@U1>", "accents folded");
 });
 
 test("a lot that arrived while the previous reply was leaving: the run sees that reply, the effect, and which messages are new", async () => {
