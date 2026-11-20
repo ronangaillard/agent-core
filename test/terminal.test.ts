@@ -143,6 +143,18 @@ test("the conversation is cut to its end in bytes, on a character boundary", () 
   assert.match(cut, /^…\(cut\)\né+$/);
 });
 
+test("the session's first result ends the run, even if the process goes on (background agents waking it again)", async () => {
+  async function* forever(): AsyncGenerator<string, number> {
+    yield JSON.stringify({ type: "result", subtype: "success", structured_output: { report: "PR #6364 opened" } });
+    yield JSON.stringify(todos(["Fix the reviewers' points", "in_progress"]));
+    await new Promise(() => undefined);
+    return 0;
+  }
+  const news: string[] = [];
+  assert.deepEqual(await readSession(forever(), (text) => news.push(text)), { report: "PR #6364 opened" });
+  assert.deepEqual(news, [], "what it does after its report is not news");
+});
+
 test("a session without a result, or a failed one, is an error that says why", async () => {
   await assert.rejects(readSession(stream(["claude: command not found"], 127), () => undefined), /without a result \(exit 127\): claude: command not found/);
   await assert.rejects(readSession(stream([{ type: "result", subtype: "error_max_turns", is_error: true }], 1), () => undefined), /failed \(error_max_turns\)/);

@@ -221,10 +221,15 @@ export async function readSession(lines: AsyncGenerator<string, number>, progres
         }
       }
     }
-    if (message?.type === "result") result = message;
+    if (message?.type === "result") {
+      // Its final word: the run is over, even if the process stays (background agents it started, which would wake it
+      // again and keep working on the branch). The caller closes the workshop, which stops them.
+      result = message;
+      break;
+    }
     step = await lines.next();
   }
-  const code = step.value;
+  const code = step.done ? step.value : undefined;
   if (!result) throw new Error(`the session stopped without a result (exit ${code})${noise.length ? `: ${noise.slice(-5).join(" / ")}` : ""}`);
   if (result.subtype !== "success" || result.is_error) throw new Error(`the session failed (${result.subtype}${result.result ? `: ${result.result.slice(0, 300)}` : ""})`);
   const parsed = resultSchema.safeParse(result.structured_output);
