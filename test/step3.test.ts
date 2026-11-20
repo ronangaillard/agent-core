@@ -140,20 +140,21 @@ test("send: a crash after the write and before the answer leaves the send dead, 
   restarted.kill();
 });
 
-test("send: the rights come from the scope, never from the model", async () => {
+test("send: the rights come from the scope, never from the model; a person can be written to from anywhere", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
   const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team, board } });
   assert.match(await core.send(context(colleague), "board", "x"), /not allowed/);
-  assert.match(await core.send(context(colleague), "inès", "x"), /Unknown destination/);
+  assert.equal(await core.send(context(colleague), "inès", "x"), "Sent.", "a direct message, asked from a colleague's conversation");
   assert.equal(await core.send(context(colleague), "team", "x"), "Sent.");
-  assert.equal(await core.send(context(owner), "inès", "x"), "Sent.");
   assert.equal(textsIn(connector, "dm-inès").length, 1);
+  assert.match(await core.send(context(colleague), "nobody", "x"), /Nobody named/);
   assert.match(await core.send(context(owner), "nobody", "x"), /Nobody named/);
   assert.match(await core.send(context(owner, "team"), "team", "y"), /this conversation/);
   // message:<id>: a private exchange of someone else is out of reach, even for the owner.
   const paul = core.store.ingest(world.say("secret", { thread: "paul-dm", author: "paul", ownerOnly: false }), "fake")!;
   assert.match(await core.send(context(owner), `message:${paul}`, "x"), /No such message/);
+  assert.match(await core.send(context(colleague), `message:${paul}`, "x"), /only the owner/);
   const open = core.store.ingest({ ...world.say("question", { thread: "chan", dm: false, author: "paul", ownerOnly: false }), private: false }, "fake")!;
   assert.equal(await core.send(context(owner), `message:${open}`, "answer"), "Sent.");
   assert.deepEqual(textsIn(connector, "chan"), ["answer"]);
@@ -298,8 +299,8 @@ test("github: the events of a connector not configured as the owner's never get 
   const body = runBody({ id: 12 });
   github.handle("workflow_run", `sha256=${createHmac("sha256", "s3cret").update(body).digest("hex")}`, body);
   await waitFor(() => tools.length > 0);
-  const result = await core.send({ scope: { owner: false, requester: "github", private: true }, threadKey: "github:acme/app:main", lotIds: [1], connector: "github", address: { connector: "github", conversation: "acme/app", thread: "main" } }, "alice", "x");
-  assert.match(result, /Unknown destination/);
+  const result = await core.send({ scope: { owner: false, requester: "github", private: true }, threadKey: "github:acme/app:main", lotIds: [1], connector: "github", address: { connector: "github", conversation: "acme/app", thread: "main" } }, "message:1", "x");
+  assert.match(result, /only the owner/);
   core.kill();
   await github.stop?.();
 });

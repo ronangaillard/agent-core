@@ -13,7 +13,7 @@ export function actTools(core: Core): ToolDef[] {
       description:
         "Post a message somewhere else than this conversation (your reply already goes here). " +
         (known.length ? `Destinations: ${known.join(", ")}. ` : "") +
-        "The owner may also name a person (direct message) or message:<id> (the thread of that message). One call per message; never call again after 'Status unknown'.",
+        "Or a person by name (direct message), from any conversation; the owner may also give message:<id> (the thread of that message). One call per message; never call again after 'Status unknown'.",
       input: { to: z.string().describe("A destination, a person, or message:<id>"), text: z.string().min(1) },
       rules: ["all"],
       effect: true,

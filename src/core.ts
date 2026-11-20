@@ -540,7 +540,10 @@ export class Core {
     return Object.keys(this.config.destinations);
   }
 
-  /** A named destination, or for the owner: a person (direct message) or the thread of a message (message:<id>). */
+  /**
+   * A named destination, a person (a direct message, from any conversation: it writes to whoever it needs, like a
+   * colleague), or for the owner the thread of a message (message:<id>).
+   */
   private async target(context: ToolContext, to: string): Promise<{ connector: Connector; address: Address } | string> {
     const named = this.config.destinations[to];
     if (named) {
@@ -548,10 +551,12 @@ export class Core {
       const connector = this.connectors.get(named.address.connector);
       return connector ? { connector, address: named.address } : `${to}: no connector.`;
     }
-    const known = this.destinationNames();
-    if (!context.scope.owner) return `Unknown destination.${known.length ? ` Known: ${known.join(", ")}.` : ""}`;
     const message = /^message:(\d+)$/.exec(to);
     if (message) {
+      if (!context.scope.owner) {
+        const known = this.destinationNames();
+        return `Unknown destination: only the owner can post in another thread.${known.length ? ` Known: ${known.join(", ")}.` : ""}`;
+      }
       const row = this.store.inbox(Number(message[1]));
       // The same rule as the digest.
       if (!row || !mayRecall({ private: row.private, author: row.author_id }, context.scope, this.privacy)) return "No such message.";
