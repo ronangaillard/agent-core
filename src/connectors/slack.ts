@@ -217,17 +217,18 @@ export function slackConnector(options: {
   }
 
   /** The workspace's people, loaded once (names change rarely; a restart reloads them). */
-  let people: { id: string; names: string[] }[] | undefined;
+  /** Bots too (other agents, to mention them); not the agent itself. A direct message goes to a person only. */
+  let people: { id: string; names: string[]; bot: boolean }[] | undefined;
   const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
   async function directory() {
     if (people) return people;
-    const found: { id: string; names: string[] }[] = [];
+    const found: { id: string; names: string[]; bot: boolean }[] = [];
     let cursor: string | undefined;
     do {
       const page = await reader.users.list({ limit: 500, ...(cursor ? { cursor } : {}) });
       for (const u of page.members ?? []) {
-        if (!u.id || u.deleted || u.is_bot) continue;
-        found.push({ id: u.id, names: [u.profile?.display_name, u.real_name, u.name].filter((n): n is string => Boolean(n)).map(fold) });
+        if (!u.id || u.deleted || u.id === self.userId) continue;
+        found.push({ id: u.id, names: [u.profile?.display_name, u.real_name, u.name].filter((n): n is string => Boolean(n)).map(fold), bot: Boolean(u.is_bot) });
       }
       cursor = page.response_metadata?.next_cursor || undefined;
     } while (cursor);
@@ -432,7 +433,7 @@ export function slackConnector(options: {
         let id = /^[UW][A-Z0-9]{6,}$/.test(given) ? given : undefined;
         if (!id) {
           const wanted = fold(given);
-          const all = await directory();
+          const all = (await directory()).filter((p) => !p.bot);
           const exact = all.filter((p) => p.names.includes(wanted));
           const first = all.filter((p) => p.names.some((n) => n.split(/\s+/)[0] === wanted));
           const match = exact.length === 1 ? exact : exact.length === 0 && first.length === 1 ? first : [];
