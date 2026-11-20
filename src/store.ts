@@ -282,6 +282,14 @@ export class Store {
     });
   }
 
+  /** The open task (running, waiting, failed) on this branch or with this pull request: the newest. */
+  openTaskOn(repo: string, on: { branch?: string; pr?: number }): TaskRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM tasks WHERE repo = ? AND (branch = ? OR pr = ?) AND status IN ('running', 'waiting', 'failed') ORDER BY id DESC LIMIT 1")
+      .get(repo, on.branch ?? null, on.pr ?? null) as Row | undefined;
+    return row ? taskOf(row) : undefined;
+  }
+
   /** The open tasks whose pull request this is. */
   tasksOfPr(repo: string, pr: number): TaskRecord[] {
     return (this.db.prepare("SELECT * FROM tasks WHERE repo = ? AND pr = ? AND status IN ('waiting', 'failed') ORDER BY id").all(repo, pr) as Row[]).map(taskOf);

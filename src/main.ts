@@ -87,7 +87,8 @@ const runner =
 
 /**
  * GitHub, off without a webhook secret: a conversation per repository where finished deployments and watched workflow
- * runs (GITHUB_WORKFLOWS, by name, on the default branch) arrive. Nobody reads there: the agent acts with its tools, with
+ * runs (GITHUB_WORKFLOWS, by name, on the default branch) arrive, and what asks something of an open code task (a failed
+ * run on its branch, a review or a comment on its PR). Nobody reads there: the agent acts with its tools, with
  * the owner's rights (he configured this source), e.g. telling someone in a direct message, as its memory says.
  */
 const github = process.env.GITHUB_WEBHOOK_SECRET
@@ -99,6 +100,7 @@ const github = process.env.GITHUB_WEBHOOK_SECRET
       repos: (process.env.GITHUB_REPOS ?? "").split(",").map((r) => r.trim()).filter(Boolean),
       workflows: (process.env.GITHUB_WORKFLOWS ?? "").split(",").map((w) => w.trim()).filter(Boolean),
       onPullRequestClosed: (repo, pr, merged) => core.pullRequestClosed(repo, pr, merged),
+      taskOf: (repo, on) => core.store.openTaskOn(repo, on),
     })
   : undefined;
 

@@ -22,6 +22,11 @@ export type GithubOptions = {
   api?: string;
   /** A pull request closed (merged or not): its task, if any, is settled by the core. Not a message for the agent. */
   onPullRequestClosed?: (repo: string, pr: number, merged: boolean) => void;
+  /**
+   * The open code task working on this branch or this pull request, if any. Its failed runs, and the reviews and
+   * comments on its pull request, then arrive too: the agent may continue the task to fix them.
+   */
+  taskOf?: (repo: string, on: { branch?: string; pr?: number }) => { id: number; pr: number | null } | undefined;
 };
 
 type Deployment = { id: number; ref?: string; sha?: string; environment?: string; creator?: { login?: string } };
@@ -38,17 +43,29 @@ type Run = {
   updated_at?: string;
   actor?: { login?: string };
 };
+type Person = { login?: string; type?: string };
+type Review = { id: number; state?: string; submitted_at?: string; html_url?: string; user?: Person };
+type Comment = { id: number; created_at?: string; html_url?: string; user?: Person };
 /** A name chosen by whoever can write to the repository (an environment, a ref): kept only if it looks like one. */
 const word = (value: string | undefined) => (value && /^[\w./-]{1,100}$/.test(value) ? value : "?");
 /** Only GitHub's own links: a status URL is free text too. */
 const githubLink = (value: string | null | undefined) => (value && /^https:\/\/github\.com\/[\w./?=&%-]+$/.test(value) ? value : undefined);
 
 /** A raw event: what a webhook delivery or the catch-up hands to toInbox. */
-type Raw = { repo: string } & ({ kind: "deployment"; deployment: Deployment; status: Status } | { kind: "run"; defaultBranch?: string; run: Run });
+type Raw = { repo: string } & (
+  | { kind: "deployment"; deployment: Deployment; status: Status }
+  | { kind: "run"; defaultBranch?: string; run: Run }
+  | { kind: "review"; pr: number; review: Review }
+  | { kind: "comment"; pr: number; comment: Comment }
+);
 
 const FINAL = new Set(["success", "failure", "error"]);
 /** A run that ended for real: a cancelled one (often replaced by a newer run) says nothing. */
 const RUN_FINAL = new Set(["success", "failure", "timed_out", "startup_failure"]);
+/** On a task's branch, only a run that failed asks for something. */
+const RUN_FAILED = new Set(["failure", "timed_out", "startup_failure"]);
+/** A review that asks for something: an approval or a dismissal does not. */
+const REVIEW_ASKS = new Set(["changes_requested", "commented"]);
 
 export function signatureOk(body: string, signature: string | undefined, secret: string): boolean {
   if (!signature) return false;
@@ -59,7 +76,9 @@ export function signatureOk(body: string, signature: string | undefined, secret:
 
 /**
  * GitHub as a connector: one conversation per repository (github:<owner>/<repo>), where deployments that finished and
- * finished runs of the watched workflows on the default branch arrive as messages from GitHub. Nobody can be answered
+ * finished runs of the watched workflows on the default branch arrive as messages from GitHub, and so does what asks
+ * something of an open code task: a failed run on its branch, a review or a comment on its pull request (not those
+ * signed by the agent's own tokens). Nobody can be answered
  * there: its form has no message and deliver refuses, so the agent acts with its tools (or does nothing). The text of
  * an event holds only what GitHub guarantees (ids, commit, states, logins, GitHub links; names that look like names),
  * never free text written by others:
@@ -73,6 +92,11 @@ export function githubConnector(options: GithubOptions): Connector & {
   let server: Server | undefined;
   let sink: ((raw: unknown) => void) | undefined;
   const watched = new Set(options.workflows ?? []);
+  /**
+   * The logins of the tokens: what the agent's own tasks write on GitHub (PR comments…) is signed with them, and must
+   * not wake it again.
+   */
+  const selves = new Set<string>();
   const base = options.api ?? "https://api.github.com";
 
   const addressOf = (repo: string): Address => ({ connector: "github", conversation: repo, thread: "main" });
@@ -87,15 +111,34 @@ export function githubConnector(options: GithubOptions): Connector & {
       const sha = deployment.sha && /^[0-9a-f]{7,40}$/.test(deployment.sha) ? `, commit ${deployment.sha}` : "";
       return `Deployment ${deployment.id} of ${raw.repo} (${word(deployment.ref)}${sha}) to ${word(deployment.environment)}${by}: ${status.state}.${link ? ` ${link}` : ""}`;
     }
+    if (raw.kind === "review" || raw.kind === "comment") {
+      const task = options.taskOf?.(raw.repo, { pr: raw.pr });
+      if (!task) return null;
+      const by = whom(raw.kind === "review" ? raw.review.user : raw.comment.user);
+      const link = githubLink(raw.kind === "review" ? raw.review.html_url : raw.comment.html_url);
+      const what = raw.kind === "review" ? `Review${by} on PR #${raw.pr} of ${raw.repo} (your task #${task.id}): ${word(raw.review.state)}` : `Comment${by} on PR #${raw.pr} of ${raw.repo} (your task #${task.id})`;
+      return `${what}.${link ? ` ${link}` : ""}`;
+    }
     const { run } = raw;
-    if (run.status !== "completed" || !run.conclusion || !RUN_FINAL.has(run.conclusion)) return null;
-    if (!run.name || !watched.has(run.name) || !raw.defaultBranch || run.head_branch !== raw.defaultBranch) return null;
+    if (run.status !== "completed" || !run.conclusion || !RUN_FINAL.has(run.conclusion) || !run.name) return null;
     const by = run.actor?.login ? ` by ${word(run.actor.login)}` : "";
     const link = githubLink(run.html_url);
-    return `Workflow "${run.name}" of ${raw.repo} on ${run.head_branch}${by}: ${run.conclusion}. Commit ${run.head_sha ?? "?"}, run ${run.id}${link ? ` ${link}` : ""}.`;
+    if (raw.defaultBranch && run.head_branch === raw.defaultBranch) {
+      if (!watched.has(run.name)) return null;
+      return `Workflow "${run.name}" of ${raw.repo} on ${run.head_branch}${by}: ${run.conclusion}. Commit ${run.head_sha ?? "?"}, run ${run.id}${link ? ` ${link}` : ""}.`;
+    }
+    if (!RUN_FAILED.has(run.conclusion) || !run.head_branch) return null;
+    const task = options.taskOf?.(raw.repo, { branch: run.head_branch });
+    if (!task) return null;
+    const pr = task.pr ? `, PR #${task.pr}` : "";
+    return `Workflow "${run.name}" of ${raw.repo} on ${word(run.head_branch)} (your task #${task.id}${pr}): ${run.conclusion}. Commit ${run.head_sha ?? "?"}, run ${run.id}${link ? ` ${link}` : ""}.`;
   }
 
-  const at = (raw: Raw) => (raw.kind === "deployment" ? raw.status.created_at : raw.run.updated_at) ?? new Date().toISOString();
+  const whom = (person: Person | undefined) => (person?.login ? ` by ${word(person.login)}${person.type === "Bot" ? " (a bot)" : ""}` : "");
+
+  const at = (raw: Raw) =>
+    (raw.kind === "deployment" ? raw.status.created_at : raw.kind === "run" ? raw.run.updated_at : raw.kind === "review" ? raw.review.submitted_at : raw.comment.created_at) ??
+    new Date().toISOString();
 
   async function api<T>(path: string): Promise<T> {
     // The repository owner's token if there is one (GITHUB_TOKEN_<OWNER>), else the default one.
@@ -157,6 +200,22 @@ export function githubConnector(options: GithubOptions): Connector & {
       if (payload.action === "completed") sink?.({ repo: payload.repository.full_name, kind: "run", defaultBranch: payload.repository.default_branch, run: payload.workflow_run } satisfies Raw);
       return 202;
     }
+    if (event === "pull_request_review") {
+      const payload = JSON.parse(body) as { action?: string; repository?: { full_name?: string }; pull_request?: { number?: number }; review?: Review };
+      if (!payload.repository?.full_name || !payload.pull_request?.number || !payload.review) return 400;
+      const { review } = payload;
+      if (payload.action === "submitted" && REVIEW_ASKS.has(review.state ?? "") && !selves.has(review.user?.login ?? ""))
+        sink?.({ repo: payload.repository.full_name, kind: "review", pr: payload.pull_request.number, review } satisfies Raw);
+      return 202;
+    }
+    if (event === "issue_comment") {
+      // An issue's comment: only a pull request's counts.
+      const payload = JSON.parse(body) as { action?: string; repository?: { full_name?: string }; issue?: { number?: number; pull_request?: unknown }; comment?: Comment };
+      if (!payload.repository?.full_name || !payload.issue?.number || !payload.comment) return 400;
+      if (payload.action === "created" && payload.issue.pull_request && !selves.has(payload.comment.user?.login ?? ""))
+        sink?.({ repo: payload.repository.full_name, kind: "comment", pr: payload.issue.number, comment: payload.comment } satisfies Raw);
+      return 202;
+    }
     if (event === "pull_request") {
       const payload = JSON.parse(body) as { action?: string; repository?: { full_name?: string }; pull_request?: { number?: number; merged?: boolean } };
       if (!payload.repository?.full_name || !payload.pull_request?.number) return 400;
@@ -181,6 +240,15 @@ export function githubConnector(options: GithubOptions): Connector & {
 
     async start(receive) {
       sink = receive;
+      for (const token of new Set([options.token, ...Object.values(options.tokens ?? {})].filter((t): t is string => Boolean(t)))) {
+        try {
+          const response = await fetch(`${base}/user`, { signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "agent-core" } });
+          const login = response.ok ? ((await response.json()) as { login?: string }).login : undefined;
+          if (login) selves.add(login);
+        } catch (error) {
+          console.error("github: a token's login not read (its comments would wake the agent)", error);
+        }
+      }
       server = createServer((request, response) => {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -214,7 +282,14 @@ export function githubConnector(options: GithubOptions): Connector & {
       const address = addressOf(raw.repo);
       const key = `github:${raw.repo}:main`;
       return {
-        source_id: raw.kind === "deployment" ? `github:deploy:${raw.deployment.id}` : `github:run:${raw.run.id}:${raw.run.run_attempt ?? 1}`,
+        source_id:
+          raw.kind === "deployment"
+            ? `github:deploy:${raw.deployment.id}`
+            : raw.kind === "run"
+              ? `github:run:${raw.run.id}:${raw.run.run_attempt ?? 1}`
+              : raw.kind === "review"
+                ? `github:review:${raw.review.id}`
+                : `github:comment:${raw.comment.id}`,
         address,
         thread_key: key,
         mode_key: key,
@@ -226,7 +301,14 @@ export function githubConnector(options: GithubOptions): Connector & {
         mentions_agent: false,
         mentions_owner: false,
         sent_at: at(raw),
-        payload: raw.kind === "deployment" ? { deployment: raw.deployment.id, state: raw.status.state } : { run: raw.run.id, workflow: raw.run.name, conclusion: raw.run.conclusion },
+        payload:
+          raw.kind === "deployment"
+            ? { deployment: raw.deployment.id, state: raw.status.state }
+            : raw.kind === "run"
+              ? { run: raw.run.id, workflow: raw.run.name, conclusion: raw.run.conclusion }
+              : raw.kind === "review"
+                ? { pr: raw.pr, review: raw.review.id, state: raw.review.state }
+                : { pr: raw.pr, comment: raw.comment.id },
         text,
       } satisfies InboxRow;
     },
