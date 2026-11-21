@@ -112,6 +112,8 @@ Code tasks (off unless all are set): `GITHUB_TOKEN`, `AGENT_REPOS` (comma-separa
 `STEVE_APERCU_URL` and `STEVE_APERCU_TOKEN` (the workshop where each session runs); `GITHUB_TOKEN_<OWNER>` for
 another owner's repositories (`GITHUB_TOKEN_ACME_LABS` for `acme-labs/…`), fine-grained, limited to the task
 repositories (the session holds it); `AGENT_WORKSPACE` (default `data/workspace`); `CLAUDE_TASK_MODEL` (default `opus`).
+Each run's session output (stream-json, as it came) is kept 14 days in `<AGENT_WORKSPACE>-sessions/task-<id>-<start>.jsonl`, outside the
+copies: the workshop and its Claude Code logs go with the run. It is private, like the database.
 
 E-mail (off unless the first three are set): `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `AGENT_EMAIL`;
 `AGENT_NAME` (the signature), `EMAIL_WEBHOOK_PORT` (default 8788), `EMAIL_ALLOWED_DOMAINS`

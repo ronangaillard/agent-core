@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -29,6 +29,8 @@ export type ClaudeCodeOptions = {
   workshop: OpenWorkshop;
   /** Claude's own login for the session (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY); default: this process's. */
   claudeEnv?: Record<string, string>;
+  /** Where each run's session output is kept, one file per run, 14 days (default: <workspace>-sessions). */
+  transcripts?: string;
   /** Default: github.com and api.github.com. Tests point them elsewhere. */
   gitBase?: string;
   githubApi?: string;
@@ -236,6 +238,36 @@ export async function readSession(lines: AsyncGenerator<string, number>, progres
   return { report: parsed.success ? parsed.data.report : (result.result ?? "").trim() || "(no report)" };
 }
 
+const KEEP_TRANSCRIPTS_MS = 14 * 24 * 3600_000;
+
+/**
+ * A run's transcript file (task-<id>-<start>.jsonl): the session's stream as it came, to see afterwards where the time
+ * went, since the workshop and its Claude Code logs go with the run. The ones older than 14 days go. Never in the copy.
+ */
+export function transcriptFile(dir: string, taskId: number, resumed: boolean): string {
+  mkdirSync(dir, { recursive: true });
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (Date.now() - statSync(path).mtimeMs > KEEP_TRANSCRIPTS_MS) rmSync(path, { force: true });
+  }
+  return join(dir, `task-${taskId}-${new Date().toISOString().replace(/[:.]/g, "-")}${resumed ? "-resumed" : ""}.jsonl`);
+}
+
+/** The lines, unchanged, each also appended to file (a failed write loses the transcript, never the run). */
+export async function* kept(lines: AsyncGenerator<string, number>, file: string): AsyncGenerator<string, number> {
+  let step = await lines.next();
+  while (!step.done) {
+    try {
+      appendFileSync(file, `${step.value}\n`);
+    } catch {
+      // The transcript is for debugging only.
+    }
+    yield step.value;
+    step = await lines.next();
+  }
+  return step.value;
+}
+
 /**
  * Code tasks: a Claude Code session in the task's workshop, the whole of it (its terminal, its git, its gh), with the
  * repository's own procedures. It commits, pushes the task's branch and opens the PR itself, with a GitHub token
@@ -244,6 +276,7 @@ export async function readSession(lines: AsyncGenerator<string, number>, progres
 export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
   const workspace = resolve(options.workspace);
   const vaults = resolve(options.vault ?? `${workspace}-vault`);
+  const transcripts = resolve(options.transcripts ?? `${workspace}-sessions`);
   const base = options.gitBase ?? "https://github.com";
   const api = options.githubApi ?? "https://api.github.com";
   // The copies are written here and in the workshop (another uid, allowed by an ACL): files group-writable.
@@ -289,6 +322,9 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
       AGENT_REMOTE: remote,
       // The task tools (TaskCreate, TaskUpdate): off in headless mode unless asked; they carry the session's news.
       CLAUDE_CODE_ENABLE_TODO_TOOLS: "1",
+      // Nothing in the background: a turn that ends to wait for a background agent (a repository's PR reviewers) gets
+      // the structured-output nudge, writes its report early, and that report ends the run before the PR is open.
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       ...gitIdentity(options.name),
       AGENT_MODEL: options.model ?? "opus",
       AGENT_PROMPT: prompt,
@@ -312,7 +348,8 @@ export function claudeCodeRunner(options: ClaudeCodeOptions): TaskRunner {
     };
     try {
       workshop = await options.workshop(dir);
-      const { report } = await readSession(workshop.session(SESSION_COMMAND, env, abort.signal), run.progress);
+      const lines = kept(workshop.session(SESSION_COMMAND, env, abort.signal), transcriptFile(transcripts, task.id, run.resumed));
+      const { report } = await readSession(lines, run.progress);
       const pr = await notePr();
       return { report, status: pr ? "waiting" : "done" };
     } catch (error) {

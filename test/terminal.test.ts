@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -235,6 +235,11 @@ test("runner: the session runs in the workshop with the task's token and its ori
     assert.equal(sent?.env.GIT_AUTHOR_NAME, "Steve");
     assert.equal(sent?.env.AGENT_REMOTE, bare, "the session sets its origin to the remote, in its container");
     assert.equal(sent?.env.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
+    assert.equal(sent?.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, "1", "no background agent: its wait would end the run early");
+    const transcripts = readdirSync(join(root, "workspace-sessions"));
+    assert.equal(transcripts.length, 1, "the run's session output is kept");
+    assert.match(transcripts[0]!, /^task-5-.*\.jsonl$/);
+    assert.match(readFileSync(join(root, "workspace-sessions", transcripts[0]!), "utf8"), /"structured_output":\{"report":"done, PR #42"\}/);
     const copy = join(root, "workspace", "task-5");
     assert.equal(git(copy, "rev-parse", "--abbrev-ref", "HEAD"), "agent/5-x");
 
