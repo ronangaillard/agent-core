@@ -498,25 +498,38 @@ test("github: what asks something of an open task (a failed run on its branch, a
   api.close();
 });
 
-test("edit_message, delete_message: the agent's own messages show their post:<id>, changed in this conversation only", async () => {
+test("edit_message, delete_message: a post:<n> names its own conversation, here for anyone, elsewhere for the owner only", async () => {
   const world = new World();
   const done: string[] = [];
   const connector = Object.assign(new FakeConnector(world), {
     edit: async (address: Address, ref: string, text: string) => {
-      if (ref === "9") throw new Error("cant_update_message");
-      done.push(`edit ${address.conversation} ${address.ts ?? ""} ${ref} ${text}`);
+      if (ref === "refused") throw new Error("cant_update_message");
+      done.push(`edit ${address.conversation} ${ref} ${text}`);
     },
     remove: async (address: Address, ref: string) => {
-      done.push(`remove ${address.conversation} ${address.ts ?? ""} ${ref}`);
+      done.push(`remove ${address.conversation} ${ref}`);
     },
   });
   const core = makeCore(freshDb(), connector, echoBrain().brain);
   assert.ok(core.editsPosts());
-  const here = { ...context(colleague), address: { connector: "fake", conversation: "C1", thread: "main", ts: "5" } };
-  assert.equal(await core.editPost(here, "post:3", "Better."), "Edited.");
-  assert.equal(await core.deletePost(here, "3"), "Deleted.");
-  assert.equal(await core.editPost(here, "post:9", "No."), "Not done: cant_update_message.");
-  assert.match(await core.deletePost(here, "post:"), /Give the post:<id>/);
-  assert.deepEqual(done, ["edit C1  3 Better.", "remove C1  3"], "on the conversation, not the message being answered");
+  // In the channel: Paul's question, the agent's long answer; then the owner, in his DM, reads it.
+  const asked = { ...world.say("a question", { thread: "chan", dm: false, author: "paul", ownerOnly: false }), private: false };
+  world.threads.get("chan")!.push({ author: "you", text: "a long answer", at: new Date().toISOString(), ref: "111.1" }, { author: "you", text: "no", at: new Date().toISOString(), ref: "refused" });
+  const id = core.store.ingest(asked, "fake")!;
+  const read = await core.readConversation(context(owner, "owner"), `message:${id}`);
+  const post = /you \(post:(\d+)\): a long answer/.exec(read)?.[1];
+  assert.ok(post, read);
+  assert.doesNotMatch(read, /paul \(post:/, "only its own messages carry one");
+  // From the DM, the post is changed where it is: the channel, not the DM.
+  assert.equal(await core.editPost(context(owner, "owner"), `post:${post}`, "Short."), "Edited.");
+  assert.equal(await core.deletePost(context(owner, "owner"), post!), "Deleted.");
+  assert.deepEqual(done, ["edit chan 111.1 Short.", "remove chan 111.1"]);
+  // Someone else, from another conversation: no. In the channel itself: yes.
+  assert.match(await core.deletePost(context(colleague, "t1"), `post:${post}`), /only the owner/);
+  assert.equal(await core.deletePost(context(colleague, "chan"), `post:${post}`), "Deleted.");
+  // Slack's refusal comes back as it is; an unknown post is said.
+  const refused = /you \(post:(\d+)\): no/.exec(read)?.[1];
+  assert.equal(await core.editPost(context(owner, "owner"), `post:${refused}`, "x"), "Not done: cant_update_message.");
+  assert.match(await core.deletePost(context(owner, "owner"), "post:999"), /No such post/);
   core.kill();
 });

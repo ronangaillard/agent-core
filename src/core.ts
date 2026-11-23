@@ -21,7 +21,7 @@ const brief = (text: string, max: number) => {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 };
 /** A message as the models read it: its local time, who, what. */
-const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}${m.ref ? ` (post:${m.ref})` : ""}: ${m.text}`;
+const asRead = (m: ThreadMessage, post?: number) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}${post ? ` (post:${post})` : ""}: ${m.text}`;
 
 const gateSchema = z.object({ speak: z.boolean().describe("true only if the agent has a real reason to speak") });
 const gateReactSchema = gateSchema.extend({
@@ -501,7 +501,7 @@ export class Core {
       const connector = found && this.connectors.get(found.connector);
       if (!found || !connector) return "No such message (found:<n> refs last until a restart).";
       const thread = await connector.read(found.address);
-      return `${thread.label}\n${thread.messages.map(asRead).join("\n")}`;
+      return `${thread.label}\n${this.readable(connector.id, found.address, thread.messages).join("\n")}`;
     }
     const id = /^(?:message:)?(\d+)$/.exec(ref.trim());
     const row = id ? this.store.inbox(Number(id[1])) : undefined;
@@ -511,7 +511,7 @@ export class Core {
     if (row.thread_key === context.threadKey) return "That is this conversation: you already have it.";
     // The thread as it is now, not as it was at that message.
     const thread = await connector.read(threadOf(row.address));
-    const lines = thread.messages.map(asRead);
+    const lines = this.readable(connector.id, row.address, thread.messages);
     return `${thread.label} [${row.thread_key}]\n${lines.join("\n")}`;
   }
 
@@ -541,23 +541,55 @@ export class Core {
     return [...this.connectors.values()].some((c) => c.edit && c.remove);
   }
 
-  /** The edit_message tool: one of the agent's own messages, in this conversation only. */
+  /**
+   * The agent's own messages, as shown to it (post:<n>): which conversation each is in, so that edit_message and
+   * delete_message act on that one, wherever it was read. The same post keeps its number; the last 2000, in memory.
+   */
+  private readonly posts = new Map<number, { connector: string; address: Address; ref: string }>();
+  private readonly postNumbers = new Map<string, number>();
+  private postNext = 1;
+
+  /** A thread read at this address, as the agent reads it: its own messages carry their post:<n>. */
+  private readable(connectorId: string, at: Address, messages: ThreadMessage[], mark: (m: ThreadMessage) => string = () => ""): string[] {
+    const address = threadOf(at);
+    return messages.map((m) => `${mark(m)}${asRead(m, m.ref ? this.postNumber(connectorId, address, m.ref) : undefined)}`);
+  }
+
+  private postNumber(connector: string, address: Address, ref: string): number {
+    const key = `${connector}\n${address.conversation}\n${ref}`;
+    const known = this.postNumbers.get(key);
+    if (known !== undefined) return known;
+    const n = this.postNext++;
+    this.posts.set(n, { connector, address, ref });
+    this.postNumbers.set(key, n);
+    if (this.posts.size > 2000) {
+      const [oldest, post] = this.posts.entries().next().value!;
+      this.posts.delete(oldest);
+      this.postNumbers.delete(`${post.connector}\n${post.address.conversation}\n${post.ref}`);
+    }
+    return n;
+  }
+
+  /** The edit_message tool: one of the agent's own messages, here, or for the owner anywhere. */
   editPost(context: ToolContext, ref: string, text: string): Promise<string> {
     return this.onOwnPost(context, ref, "Edited.", (connector, address, id) => connector.edit!(address, id, text));
   }
 
-  /** The delete_message tool: one of the agent's own messages, in this conversation only. */
+  /** The delete_message tool: one of the agent's own messages, here, or for the owner anywhere. */
   deletePost(context: ToolContext, ref: string): Promise<string> {
     return this.onOwnPost(context, ref, "Deleted.", (connector, address, id) => connector.remove!(address, id));
   }
 
   private async onOwnPost(context: ToolContext, ref: string, done: string, act: (connector: Connector, address: Address, id: string) => Promise<void>): Promise<string> {
-    const connector = this.connectors.get(context.connector);
-    if (!connector?.edit || !connector.remove) return "Messages cannot be edited here.";
-    const id = ref.trim().replace(/^post:/, "");
-    if (!id) return "Give the post:<id> of one of your messages in this conversation.";
+    const n = /^(?:post:)?(\d+)$/.exec(ref.trim());
+    const post = n ? this.posts.get(Number(n[1])) : undefined;
+    if (!post) return "No such post: give the post:<n> shown next to one of your messages (read the conversation again after a restart).";
+    const connector = this.connectors.get(post.connector);
+    if (!connector?.edit || !connector.remove) return "Messages cannot be edited there.";
+    // Like a send to message:<id>: another conversation is the owner's to have changed.
+    if (this.threadKeyOf(post.address) !== context.threadKey && !context.scope.owner) return "That message is in another conversation: only the owner can have it changed.";
     try {
-      await act(connector, threadOf(context.address), id);
+      await act(connector, post.address, post.ref);
     } catch (error) {
       return `Not done: ${error instanceof Error ? error.message : String(error)}.`;
     }
@@ -697,12 +729,20 @@ export class Core {
       return `Task #${task.id} was asked by someone else: only they, the owner, or its own conversation can change it.`;
     }
     this.runs.get(task.id)?.abort();
-    this.store.updateTask(task.id, { status: "running", request: ask.request, owner_asked: task.owner_asked && scope.owner, resumes: 0 });
+    // Its report goes to whoever asked this: here, not back to its own conversation (a channel the asker is not in).
+    const here = task.thread_key === context.threadKey;
+    this.store.updateTask(task.id, {
+      status: "running",
+      request: ask.request,
+      owner_asked: task.owner_asked && scope.owner,
+      resumes: 0,
+      report_address: here ? null : from,
+      report_thread_key: here ? null : context.threadKey,
+    });
     // A private conversation is not handed to a task that reports somewhere else: the request alone goes.
     const share = task.thread_key === context.threadKey || !scope.private;
     this.launch(this.store.task(task.id)!, ask.request, false, share ? from : undefined);
-    const where = task.thread_key === context.threadKey ? "this conversation" : `its conversation (${task.thread_key})`;
-    return `Task #${task.id} continues on its copy and branch${task.pr ? ` (PR #${task.pr})` : ""}. The report will come in ${where}.`;
+    return `Task #${task.id} continues on its copy and branch${task.pr ? ` (PR #${task.pr})` : ""}. The report will come in this conversation${here ? "" : `, not in the task's own (${task.thread_key}): post there yourself only what its people need`}.`;
   }
 
   /**
@@ -1110,7 +1150,7 @@ export class Core {
     const found = new Set(lot.map(said).filter(Boolean));
     const system = last.author_kind === "system";
     const fresh = found.size || system ? found : new Set(thread.messages.slice(-lot.length));
-    const transcript = thread.messages.map((m) => `${fresh.has(m) ? "[new] " : ""}${asRead(m)}`).join("\n");
+    const transcript = this.readable(connector.id, last.address, thread.messages, (m) => (fresh.has(m) ? "[new] " : "")).join("\n");
     const late = lot.some((row) => row.caught_up) ? `\n${this.prompts.text("ask-late")}` : "";
     const elsewhere = digest(this.store, last.thread_key, scope, this.privacy);
     // Its own posts since the lot began (and just before): the read may lag, or stop before them.

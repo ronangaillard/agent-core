@@ -64,7 +64,7 @@ test("code task: started from a conversation, continued there by default, report
   core.kill();
 });
 
-test("code task: continued from elsewhere it reports where it was asked; a private task stays out of reach", async () => {
+test("code task: continued from elsewhere it reports to whoever asked, not to its own conversation; a private task stays out of reach", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
   const { runner } = fakeRunner();
@@ -74,9 +74,13 @@ test("code task: continued from elsewhere it reports where it was asked; a priva
   await core.startTask(context({ ...paul, private: true }, "paul-dm"), { request: "secret thing", fresh: false });
   await waitFor(() => core.store.task(2)?.status === "waiting");
 
-  assert.match(await core.startTask(context(owner, "owner-dm"), { request: "XLSX instead", task: 1, fresh: false }), /report will come in its conversation \(fake:a\)/);
-  await waitFor(() => textsIn(connector, "a").includes("done: XLSX instead"));
-  assert.equal(textsIn(connector, "owner-dm").length, 0);
+  assert.match(await core.startTask(context(owner, "owner-dm"), { request: "XLSX instead", task: 1, fresh: false }), /report will come in this conversation, not in the task's own \(fake:a\)/);
+  await waitFor(() => textsIn(connector, "owner-dm").includes("done: XLSX instead"));
+  assert.deepEqual(textsIn(connector, "a"), ["done: export"], "its own conversation is not told of what another asked");
+  // Asked again in its own conversation: reported there again.
+  assert.match(await core.startTask(context(paul, "a"), { request: "CSV after all", fresh: false }), /report will come in this conversation\./);
+  await waitFor(() => textsIn(connector, "a").includes("done: CSV after all"));
+  assert.deepEqual(textsIn(connector, "owner-dm"), ["done: XLSX instead"]);
   assert.match(await core.startTask(context(owner, "owner-dm"), { request: "peek", task: 2, fresh: false }), /No task #2/);
   // The rights of a continuation: the lesser of the task's and the requester's.
   assert.equal(core.store.task(1)!.owner_asked, false);

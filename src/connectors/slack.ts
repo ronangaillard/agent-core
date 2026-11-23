@@ -566,10 +566,8 @@ export function slackConnector(options: {
     },
 
     async remove(address, ref) {
-      await client.chat.delete({ channel: address.conversation, ts: ref }).catch((error: { data?: { error?: string } }) => {
-        if (error.data?.error === "message_not_found") return;
-        refused(error);
-      });
+      // message_not_found is said, not taken for done: it is as likely the wrong place as a message already gone.
+      await client.chat.delete({ channel: address.conversation, ts: ref }).catch(refused);
     },
 
     async deliver(address, post): Promise<DeliverResult> {

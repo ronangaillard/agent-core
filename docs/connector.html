@@ -65,7 +65,7 @@ a{color:#2457C5}a:hover{color:#1A3F91}
   typing?(address: Address): Promise&lt;void&gt;;  reacts?: boolean;
   search?(query: string, limit: number): Promise&lt;Found[]&gt;;  <span style="color: #6B6B65">// with the owner's rights</span>
   file?(id: string): Promise&lt;SharedFile&gt;;    <span style="color: #6B6B65">// a shared file by its file:&lt;id&gt; → the open_file tool</span>
-  edit?(address, ref, text); remove?(address, ref);  <span style="color: #6B6B65">// its own posts (post:&lt;ref&gt;) → edit · delete_message</span>
+  edit?(address, ref, text); remove?(address, ref);  <span style="color: #6B6B65">// its own posts (ThreadMessage.ref) → edit · delete_message</span>
   onConnected?(cb: () =&gt; void): void;  onDisconnected?(cb: () =&gt; void): void;
 }</div>
 </div>

@@ -56,16 +56,16 @@ export function actTools(core: Core): ToolDef[] {
       ? [
           {
             name: "edit_message",
-            description: "Rewrite one of your own messages in this conversation, given its post:<id> (shown next to \"you\"). The whole new text.",
-            input: { message: z.string().describe("post:<id>"), text: z.string().min(1) },
+            description: "Rewrite one of your own messages, given its post:<n> (shown next to \"you\", here or in a conversation read with read_conversation). The whole new text. Elsewhere than here: only for the owner.",
+            input: { message: z.string().describe("post:<n>"), text: z.string().min(1) },
             rules: ["all" as const],
             effect: true,
             run: (args: Record<string, unknown>, context: ToolContext) => core.editPost(context, String(args.message), String(args.text)),
           },
           {
             name: "delete_message",
-            description: "Delete one of your own messages in this conversation, given its post:<id> (shown next to \"you\").",
-            input: { message: z.string().describe("post:<id>") },
+            description: "Delete one of your own messages, given its post:<n> (shown next to \"you\", here or in a conversation read with read_conversation). Elsewhere than here: only for the owner.",
+            input: { message: z.string().describe("post:<n>") },
             rules: ["all" as const],
             effect: true,
             run: (args: Record<string, unknown>, context: ToolContext) => core.deletePost(context, String(args.message)),

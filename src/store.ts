@@ -78,6 +78,9 @@ export type TaskRecord = {
   owner_asked: boolean;
   private: boolean;
   resumes: number;
+  /** Where its reports go: the conversation that last asked it something, when not its own (null: its own). */
+  report_address: Address | null;
+  report_thread_key: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -97,9 +100,17 @@ const taskOf = (r: Row): TaskRecord => ({
   owner_asked: Boolean(r.owner_asked),
   private: Boolean(r.private),
   resumes: Number(r.resumes),
+  report_address: r.report_address ? (JSON.parse(String(r.report_address)) as Address) : null,
+  report_thread_key: r.report_thread_key ? String(r.report_thread_key) : null,
   created_at: String(r.created_at),
   updated_at: String(r.updated_at),
 });
+
+/** Where a task's report goes: thread_key, connector, address (the conversation that last asked, else its own). */
+const reportPlace = (task: TaskRecord): [string, string, string] => {
+  const address = task.report_address ?? task.address;
+  return [task.report_thread_key ?? task.thread_key, task.report_address?.connector ?? task.connector, JSON.stringify(address)];
+};
 
 const inboxOf = (r: Row): InboxRecord => ({
   id: Number(r.id),
@@ -317,13 +328,13 @@ export class Store {
   }
 
   /** A change of the task, its event with it; a report to its conversation too, when there is one. */
-  updateTask(id: number, fields: Partial<Pick<TaskRecord, "status" | "pr" | "request" | "requester" | "owner_asked" | "resumes">>, report?: string, alert?: string) {
+  updateTask(id: number, fields: Partial<Pick<TaskRecord, "status" | "pr" | "request" | "requester" | "owner_asked" | "resumes" | "report_address" | "report_thread_key">>, report?: string, alert?: string) {
     tx(this.db, () => {
       const task = this.task(id);
       if (!task) return;
       const columns = Object.keys(fields);
       if (columns.length) {
-        const values = Object.values(fields).map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : (v ?? null)) as SQLInputValue);
+        const values = Object.values(fields).map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v !== null && typeof v === "object" ? JSON.stringify(v) : (v ?? null)) as SQLInputValue);
         this.db.prepare(`UPDATE tasks SET ${columns.map((c) => `${c} = ?`).join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), id);
       }
       if (fields.status) this.event({ kind: `task_${fields.status}`, thread_key: task.thread_key, private: task.private, ref: id });
@@ -331,7 +342,7 @@ export class Store {
       if (report) {
         this.db
           .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('report', NULL, ?, ?, ?, ?, 'pending', ?)")
-          .run(task.thread_key, task.connector, JSON.stringify(task.address), JSON.stringify({ text: report }), now());
+          .run(...reportPlace(this.task(id)!), JSON.stringify({ text: report }), now());
       }
     });
   }

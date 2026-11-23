@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   owner_asked INTEGER NOT NULL,
   private INTEGER NOT NULL,
   resumes INTEGER NOT NULL DEFAULT 0,
+  report_address TEXT,
+  report_thread_key TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -118,6 +120,9 @@ export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path, { timeout: 5000 });
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
+  // Added since: where a task's reports go when it was last asked from another conversation.
+  const taskColumns = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  if (!taskColumns.includes("report_address")) db.exec("ALTER TABLE tasks ADD COLUMN report_address TEXT; ALTER TABLE tasks ADD COLUMN report_thread_key TEXT;");
   return db;
 }
 
