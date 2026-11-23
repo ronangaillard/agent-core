@@ -26,7 +26,7 @@ Architecture diagrams: [docs/](docs/index.html) (published at https://ronangaill
 | `src/db.ts` | The SQLite schema and transactions |
 | `src/store.ts` | Every read and write of the tables |
 | `src/core.ts` | The inbound queue (lot, settle, attempts, backoff), `respond()`, the outbound queue and delivery, the scheduler, `send()` |
-| `src/act.ts` | The tools that act or reach elsewhere: `send`, `read_conversation`, `search_messages`, `open_file`, `set_reminder`, `list_reminders`, `cancel_reminder` |
+| `src/act.ts` | The tools that act or reach elsewhere: `send`, `read_conversation`, `search_messages`, `open_file`, `edit_message`, `delete_message`, `set_reminder`, `list_reminders`, `cancel_reminder` |
 | `src/claude.ts` | The model through the Claude Agent SDK, tools as an in-process MCP server |
 | `src/access.ts` | Rights: which tools a scope gets, checked again when a tool runs |
 | `src/memory.ts` | Markdown memory: `common/` everywhere, `private/` only with the owner in private; read-only shelves; `memory_list`, `memory_read`, `memory_write` |

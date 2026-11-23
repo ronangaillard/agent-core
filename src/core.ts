@@ -21,7 +21,7 @@ const brief = (text: string, max: number) => {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 };
 /** A message as the models read it: its local time, who, what. */
-const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}: ${m.text}`;
+const asRead = (m: ThreadMessage) => `${m.at ? `[${localTime(m.at)}] ` : ""}${m.author}${m.ref ? ` (post:${m.ref})` : ""}: ${m.text}`;
 
 const gateSchema = z.object({ speak: z.boolean().describe("true only if the agent has a real reason to speak") });
 const gateReactSchema = gateSchema.extend({
@@ -534,6 +534,34 @@ export class Core {
     const text = file.data.toString("utf8");
     if (!/^text\/|json|xml|yaml|csv|javascript|typescript|x-sh/.test(file.mime) && text.includes("\uFFFD")) return `${file.name}: a ${file.mime} file, it cannot be opened.`;
     return `${file.name} (${file.mime})\n${text.length > 30_000 ? `${text.slice(0, 30_000)}\n…(cut)` : text}`;
+  }
+
+  /** This conversation's connector can edit or delete the agent's own messages: the edit_message and delete_message tools exist. */
+  editsPosts(): boolean {
+    return [...this.connectors.values()].some((c) => c.edit && c.remove);
+  }
+
+  /** The edit_message tool: one of the agent's own messages, in this conversation only. */
+  editPost(context: ToolContext, ref: string, text: string): Promise<string> {
+    return this.onOwnPost(context, ref, "Edited.", (connector, address, id) => connector.edit!(address, id, text));
+  }
+
+  /** The delete_message tool: one of the agent's own messages, in this conversation only. */
+  deletePost(context: ToolContext, ref: string): Promise<string> {
+    return this.onOwnPost(context, ref, "Deleted.", (connector, address, id) => connector.remove!(address, id));
+  }
+
+  private async onOwnPost(context: ToolContext, ref: string, done: string, act: (connector: Connector, address: Address, id: string) => Promise<void>): Promise<string> {
+    const connector = this.connectors.get(context.connector);
+    if (!connector?.edit || !connector.remove) return "Messages cannot be edited here.";
+    const id = ref.trim().replace(/^post:/, "");
+    if (!id) return "Give the post:<id> of one of your messages in this conversation.";
+    try {
+      await act(connector, threadOf(context.address), id);
+    } catch (error) {
+      return `Not done: ${error instanceof Error ? error.message : String(error)}.`;
+    }
+    return done;
   }
 
   destinationNames(): string[] {

@@ -19,6 +19,12 @@ function readError(error: unknown): unknown {
   return passing ? new TransientError(e.message ?? String(error)) : error;
 }
 
+/** Slack refused an edit or a deletion: its reason (cant_update_message, edit_window_closed…) for the agent. */
+function refused(error: unknown): never {
+  const e = error as { data?: { error?: string }; message?: string };
+  throw new Error(e.data?.error ?? e.message ?? String(error));
+}
+
 /** The fields of a Slack message event the connector reads. */
 type SlackMessage = {
   channel?: string;
@@ -318,11 +324,16 @@ export function slackConnector(options: {
       if (raw.length > THREAD_KEEP) raw = [raw[0]!, ...raw.slice(-(THREAD_KEEP - 1))];
     }
     const messages = await Promise.all(
-      raw.map(async (m) => ({
-        author: m.user === self.userId || (self.botId && m.bot_id === self.botId) ? "you" : await nameOf(m.user ?? m.bot_id),
-        text: await readable(m),
-        at: m.ts ? isoOf(m.ts) : "",
-      })),
+      raw.map(async (m) => {
+        const own = m.user === self.userId || Boolean(self.botId && m.bot_id === self.botId);
+        return {
+          author: own ? "you" : await nameOf(m.user ?? m.bot_id),
+          text: await readable(m),
+          at: m.ts ? isoOf(m.ts) : "",
+          // Its own messages carry their ts: edit_message and delete_message name them by it.
+          ...(own && m.ts ? { ref: m.ts } : {}),
+        };
+      }),
     );
     const name = channelNames.get(address.conversation);
     const label = address.conversation.startsWith("D") ? "in a direct message" : name ? `in #${name}` : "in a channel";
@@ -545,6 +556,20 @@ export function slackConnector(options: {
       },
       guide: (row) => ({ prompt: row.dm ? "slack-dm" : "slack-thread" }),
       toPosts: slackPosts,
+    },
+
+    // With the bot's token: Slack lets it change only the bot's own messages (cant_update_message otherwise).
+    async edit(address, ref, text) {
+      const formatted = slackFormat(text);
+      const mentioned = await directory().then((people) => slackMentions(formatted, people), () => formatted);
+      await client.chat.update({ channel: address.conversation, ts: ref, text: mentioned, blocks: [] }).catch(refused);
+    },
+
+    async remove(address, ref) {
+      await client.chat.delete({ channel: address.conversation, ts: ref }).catch((error: { data?: { error?: string } }) => {
+        if (error.data?.error === "message_not_found") return;
+        refused(error);
+      });
     },
 
     async deliver(address, post): Promise<DeliverResult> {

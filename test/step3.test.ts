@@ -5,7 +5,7 @@ import { openDb } from "../src/db.ts";
 import { githubConnector } from "../src/connectors/github.ts";
 import { Core } from "../src/core.ts";
 import { Store } from "../src/store.ts";
-import type { Brain, Scope, ToolContext } from "../src/types.ts";
+import type { Address, Brain, Scope, ToolContext } from "../src/types.ts";
 import { config, echoBrain, FakeConnector, freshDb, makeCore, sleep, waitFor, World } from "./helpers.ts";
 
 const owner: Scope = { owner: true, requester: "ronan", private: true };
@@ -496,4 +496,27 @@ test("github: what asks something of an open task (a failed run on its branch, a
   core.kill();
   await github.stop?.();
   api.close();
+});
+
+test("edit_message, delete_message: the agent's own messages show their post:<id>, changed in this conversation only", async () => {
+  const world = new World();
+  const done: string[] = [];
+  const connector = Object.assign(new FakeConnector(world), {
+    edit: async (address: Address, ref: string, text: string) => {
+      if (ref === "9") throw new Error("cant_update_message");
+      done.push(`edit ${address.conversation} ${address.ts ?? ""} ${ref} ${text}`);
+    },
+    remove: async (address: Address, ref: string) => {
+      done.push(`remove ${address.conversation} ${address.ts ?? ""} ${ref}`);
+    },
+  });
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
+  assert.ok(core.editsPosts());
+  const here = { ...context(colleague), address: { connector: "fake", conversation: "C1", thread: "main", ts: "5" } };
+  assert.equal(await core.editPost(here, "post:3", "Better."), "Edited.");
+  assert.equal(await core.deletePost(here, "3"), "Deleted.");
+  assert.equal(await core.editPost(here, "post:9", "No."), "Not done: cant_update_message.");
+  assert.match(await core.deletePost(here, "post:"), /Give the post:<id>/);
+  assert.deepEqual(done, ["edit C1  3 Better.", "remove C1  3"], "on the conversation, not the message being answered");
+  core.kill();
 });

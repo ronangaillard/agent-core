@@ -54,7 +54,8 @@ export type DeliverResult =
   /** transient: the post certainly did not leave (429, 5xx received, connection refused). Ambiguous: throw. */
   | { ok: false; transient: boolean; error: string };
 
-export type ThreadMessage = { author: string; text: string; at: string };
+/** ref: on the agent's own messages, the id its connector edits or deletes it by (post:<ref>). */
+export type ThreadMessage = { author: string; text: string; at: string; ref?: string };
 /** A message found by a connector's search: where it is, to read its conversation. */
 export type Found = { at: string; author: string; place: string; text: string; address: Address };
 export type Thread = { label: string; messages: ThreadMessage[] };
@@ -118,6 +119,10 @@ export interface Connector {
   search?(query: string, limit: number): Promise<Found[]>;
   /** A file shared in a conversation, by the id its messages show (file:<id>). */
   file?(id: string): Promise<SharedFile>;
+  /** Rewrite one of the agent's own messages in this conversation (its ref, as read() gives it). Throws when refused. */
+  edit?(address: Address, ref: string, text: string): Promise<void>;
+  /** Delete one of the agent's own messages in this conversation. Already gone counts as done. Throws when refused. */
+  remove?(address: Address, ref: string): Promise<void>;
   /** It delivers { reaction } posts: the triage gate may then react where the agent stays silent. */
   reacts?: boolean;
   /** A person (name or id) → the address of a direct message with them, or null. */

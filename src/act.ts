@@ -52,6 +52,26 @@ export function actTools(core: Core): ToolDef[] {
           },
         ]
       : []),
+    ...(core.editsPosts()
+      ? [
+          {
+            name: "edit_message",
+            description: "Rewrite one of your own messages in this conversation, given its post:<id> (shown next to \"you\"). The whole new text.",
+            input: { message: z.string().describe("post:<id>"), text: z.string().min(1) },
+            rules: ["all" as const],
+            effect: true,
+            run: (args: Record<string, unknown>, context: ToolContext) => core.editPost(context, String(args.message), String(args.text)),
+          },
+          {
+            name: "delete_message",
+            description: "Delete one of your own messages in this conversation, given its post:<id> (shown next to \"you\").",
+            input: { message: z.string().describe("post:<id>") },
+            rules: ["all" as const],
+            effect: true,
+            run: (args: Record<string, unknown>, context: ToolContext) => core.deletePost(context, String(args.message)),
+          },
+        ]
+      : []),
     {
       name: "set_reminder",
       description: "Be woken up later in this conversation, with this note. The note is all you will have: make it self-contained.",
