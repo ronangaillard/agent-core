@@ -69,6 +69,20 @@ test("reminder: a repeating one missed while down fires once, then moves to the 
   core.kill();
 });
 
+test("reminder: set by the owner in private, it fires with his rights; set by someone else, without", async () => {
+  const world = new World();
+  const connector = new FakeConnector(world);
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
+  core.remind(context(owner, "a"), new Date(Date.now() + 100).toISOString(), null, "the owner's round");
+  core.remind(context(colleague, "b"), new Date(Date.now() + 400).toISOString(), null, "Paul's round");
+  assert.deepEqual(core.store.reminders("fake:a").map((r) => r.owner_asked), [true]);
+  assert.deepEqual(core.store.reminders("fake:b").map((r) => r.owner_asked), [false]);
+  await core.start();
+  await waitFor(() => connector.scopes.length === 2);
+  assert.deepEqual(connector.scopes.map((s) => [s.requester, s.owner]), [["scheduler", true], ["scheduler", false]]);
+  core.kill();
+});
+
 test("reminder: firing the same occurrence twice gives one row", () => {
   const store = new Store(openDb(freshDb()));
   const address = { connector: "fake", conversation: "t1", thread: "main" };
