@@ -98,6 +98,7 @@ export class FakeConnector implements Connector {
     return `fake:${address.conversation}`;
   }
   async resolve(person: string): Promise<Address | null> {
+    if (person.startsWith("#")) return { connector: "fake", conversation: person.slice(1), thread: "main" };
     return person === "nobody" ? null : { connector: "fake", conversation: `dm-${person}`, thread: "main" };
   }
   async toInbox(raw: unknown) {

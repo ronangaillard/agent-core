@@ -586,45 +586,7 @@ export class Store {
     });
   }
 
-  /** A kept message refused by the bot cap. Its event tells whether the "I'm stopping" post already went. */
-  cap(row: InboxRecord, announce: boolean) {
-    tx(this.db, () => {
-      this.db.prepare("UPDATE inbox SET status = 'failed', outcome = 'capped', handled_at = ? WHERE id = ?").run(now(), row.id);
-      this.event({ kind: "capped", thread_key: row.thread_key, author_id: row.author_id, author_kind: row.author_kind, private: row.private, ref: row.id });
-      if (announce) {
-        this.db
-          .prepare("INSERT INTO outbox (kind, batch_id, thread_key, connector, address, payload, status, created_at) VALUES ('send', NULL, ?, ?, ?, ?, 'pending', ?)")
-          .run(row.thread_key, row.connector, JSON.stringify(row.address), JSON.stringify({ text: "I'm stopping here; a human can start me again." }), now());
-      }
-    });
-  }
-
   // --- what the engagement rules read --------------------------------------------------------------------------
-
-  /** Bot or system messages in a row in this thread, up to this one, since the last human and within the window. */
-  nonHumanStreak(threadKey: string, uptoId: number, since: string): number {
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM inbox
-         WHERE thread_key = ? AND id <= ? AND author_kind != 'human' AND received_at >= ?
-           AND id > (SELECT COALESCE(MAX(id), 0) FROM inbox WHERE thread_key = ? AND author_kind = 'human' AND id <= ?)`,
-      )
-      .get(threadKey, uptoId, since, threadKey, uptoId) as Row;
-    return Number(row.n);
-  }
-
-  /** The "I'm stopping" post already went since the last human message of the thread. */
-  cappedSinceHuman(threadKey: string): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM events WHERE kind = 'capped' AND thread_key = ?
-             AND id > (SELECT COALESCE(MAX(id), 0) FROM events WHERE kind = 'received' AND thread_key = ? AND author_kind = 'human')
-           LIMIT 1`,
-        )
-        .get(threadKey, threadKey) !== undefined
-    );
-  }
 
   /** The agent already spoke in this thread (mention-sticky). */
   agentSpokeIn(threadKey: string): boolean {

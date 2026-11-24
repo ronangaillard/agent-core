@@ -17,8 +17,6 @@ const context = (scope: Scope, thread = "t1", lot = 1): ToolContext => ({
   connector: "fake",
   address: { connector: "fake", conversation: thread, thread: "main" },
 });
-const team = { address: { connector: "fake", conversation: "team", thread: "main" }, rules: ["all" as const] };
-const board = { address: { connector: "fake", conversation: "board", thread: "main" }, rules: ["owner" as const] };
 const textsIn = (connector: FakeConnector, thread: string) => connector.sent.filter((s) => s.address.conversation === thread).map((s) => ("text" in s.post ? s.post.text : ""));
 
 test("reminder: set from a conversation, it comes back there as an event the agent answers", async () => {
@@ -111,27 +109,27 @@ test("reminder: at most 5 per conversation, and only that conversation's can be 
 test("send: once per place per lot, even reworded, and an ambiguous failure is never retried", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
-  const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team, board } });
-  assert.equal(await core.send(context(owner), "team", "deploy at 5"), "Sent.");
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
+  assert.equal(await core.send(context(owner), "#team", "deploy at 5"), "Sent.");
   // A re-run of the same lot rewords it: still one post.
-  assert.match(await core.send(context(owner), "team", "Deploy is at 5 pm"), /Already sent/);
+  assert.match(await core.send(context(owner), "#team", "Deploy is at 5 pm"), /Already sent/);
   assert.equal(textsIn(connector, "team").length, 1);
-  assert.deepEqual(core.store.acted("fake:t1"), ['sent to team: "deploy at 5"']);
-  assert.equal(await core.send(context(owner), "board", "deploy at 5"), "Sent.", "another place is another send");
-  assert.equal(await core.send(context(owner, "t1", 2), "team", "next lot"), "Sent.", "another lot is another send");
+  assert.deepEqual(core.store.acted("fake:t1"), ['sent to #team: "deploy at 5"']);
+  assert.equal(await core.send(context(owner), "#board", "deploy at 5"), "Sent.", "another place is another send");
+  assert.equal(await core.send(context(owner, "t1", 2), "#team", "next lot"), "Sent.", "another lot is another send");
 
   connector.deliverImpl = async () => {
     throw new Error("socket hang up");
   };
-  assert.match(await core.send(context(owner, "t1", 3), "team", "second"), /Status unknown/);
+  assert.match(await core.send(context(owner, "t1", 3), "#team", "second"), /Status unknown/);
   connector.deliverImpl = undefined;
-  assert.match(await core.send(context(owner, "t1", 3), "team", "second"), /Already sent/);
+  assert.match(await core.send(context(owner, "t1", 3), "#team", "second"), /Already sent/);
   assert.equal(textsIn(connector, "team").length, 2);
 
   connector.deliverImpl = async () => ({ ok: false, transient: false, error: "channel_not_found" });
-  assert.match(await core.send(context(owner, "t1", 4), "team", "third"), /Not sent: channel_not_found/);
+  assert.match(await core.send(context(owner, "t1", 4), "#team", "third"), /Not sent: channel_not_found/);
   connector.deliverImpl = undefined;
-  assert.equal(await core.send(context(owner, "t1", 4), "team", "third"), "Sent.");
+  assert.equal(await core.send(context(owner, "t1", 4), "#team", "third"), "Sent.");
   core.kill();
 });
 
@@ -140,37 +138,37 @@ test("send: a crash after the write and before the answer leaves the send dead, 
   const path = freshDb();
   const connector = new FakeConnector(world);
   connector.deliverImpl = () => new Promise(() => undefined);
-  const core = makeCore(path, connector, echoBrain().brain, { destinations: { team }, deliverTimeoutMs: 60_000 });
-  void core.send(context(owner), "team", "hello");
+  const core = makeCore(path, connector, echoBrain().brain, { deliverTimeoutMs: 60_000 });
+  void core.send(context(owner), "#team", "hello");
   await sleep(20);
   core.kill();
   const again = new FakeConnector(world);
-  const restarted = makeCore(path, again, echoBrain().brain, { destinations: { team } });
+  const restarted = makeCore(path, again, echoBrain().brain);
   await restarted.start();
   const send = restarted.store.allOutbox().find((row) => row.kind === "send")!;
   assert.equal(send.status, "dead");
-  assert.match(await restarted.send(context(owner), "team", "hello"), /Already sent/);
+  assert.match(await restarted.send(context(owner), "#team", "hello"), /Already sent/);
   assert.equal(textsIn(again, "team").length, 0);
   restarted.kill();
 });
 
-test("send: the rights come from the scope, never from the model; a person can be written to from anywhere", async () => {
+test("send: any channel, any person, any thread, from anywhere; a private exchange stays out of reach", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
-  const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team, board } });
-  assert.match(await core.send(context(colleague), "board", "x"), /not allowed/);
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
+  assert.equal(await core.send(context(colleague), "#board", "x"), "Sent.", "any channel, asked from a colleague's conversation");
   assert.equal(await core.send(context(colleague), "inès", "x"), "Sent.", "a direct message, asked from a colleague's conversation");
-  assert.equal(await core.send(context(colleague), "team", "x"), "Sent.");
+  assert.equal(await core.send(context(colleague), "#team", "x"), "Sent.");
   assert.equal(textsIn(connector, "dm-inès").length, 1);
-  assert.match(await core.send(context(colleague), "nobody", "x"), /Nobody named/);
-  assert.match(await core.send(context(owner), "nobody", "x"), /Nobody named/);
-  assert.match(await core.send(context(owner, "team"), "team", "y"), /this conversation/);
+  assert.match(await core.send(context(colleague), "nobody", "x"), /Nothing named/);
+  assert.match(await core.send(context(owner), "nobody", "x"), /Nothing named/);
+  assert.match(await core.send(context(owner, "team"), "#team", "y"), /this conversation/);
   // message:<id>: a private exchange of someone else is out of reach, even for the owner.
   const paul = core.store.ingest(world.say("secret", { thread: "paul-dm", author: "paul", ownerOnly: false }), "fake")!;
   assert.match(await core.send(context(owner), `message:${paul}`, "x"), /No such message/);
-  assert.match(await core.send(context(colleague), `message:${paul}`, "x"), /only the owner/);
+  assert.match(await core.send(context(colleague), `message:${paul}`, "x"), /No such message/);
   const open = core.store.ingest({ ...world.say("question", { thread: "chan", dm: false, author: "paul", ownerOnly: false }), private: false }, "fake")!;
-  assert.equal(await core.send(context(owner), `message:${open}`, "answer"), "Sent.");
+  assert.equal(await core.send(context(colleague), `message:${open}`, "answer"), "Sent.", "another thread, asked by anyone");
   assert.deepEqual(textsIn(connector, "chan"), ["answer"]);
   core.kill();
 });
@@ -314,7 +312,7 @@ test("github: the events of a connector not configured as the owner's never get 
   github.handle("workflow_run", `sha256=${createHmac("sha256", "s3cret").update(body).digest("hex")}`, body);
   await waitFor(() => tools.length > 0);
   const result = await core.send({ scope: { owner: false, requester: "github", private: true }, threadKey: "github:acme/app:main", lotIds: [1], connector: "github", address: { connector: "github", conversation: "acme/app", thread: "main" } }, "message:1", "x");
-  assert.match(result, /only the owner/);
+  assert.match(result, /No such message/, "a private conversation stays out of reach");
   core.kill();
   await github.stop?.();
 });

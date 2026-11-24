@@ -6,15 +6,13 @@ const YEAR_MS = 365 * 24 * 3600_000;
 
 /** The agent acting beyond its reply: posting elsewhere, and reminders on the current conversation. */
 export function actTools(core: Core): ToolDef[] {
-  const known = core.destinationNames();
   return [
     {
       name: "send",
       description:
-        "Post a message somewhere else than this conversation (your reply already goes here). " +
-        (known.length ? `Destinations: ${known.join(", ")}. ` : "") +
-        "Or a person by name (direct message), from any conversation; the owner may also give message:<id> (the thread of that message). One call per message; never call again after 'Status unknown'.",
-      input: { to: z.string().describe("A destination, a person, or message:<id>"), text: z.string().min(1) },
+        "Post a message somewhere else than this conversation (your reply already goes here): any channel (#name), " +
+        "a person by name (direct message), or message:<id> (the thread of that message). One call per message; never call again after 'Status unknown'.",
+      input: { to: z.string().describe("#channel, a person, or message:<id>"), text: z.string().min(1) },
       rules: ["all"],
       effect: true,
       recorded: true,

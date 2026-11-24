@@ -41,14 +41,6 @@ const modes = JSON.parse(process.env.AGENT_MODES ?? "{}") as Record<string, Mode
 /** AGENT_PRIVACY=off: every conversation recalls everything said elsewhere, private or not (one trusted team). */
 const privacy = process.env.AGENT_PRIVACY !== "off";
 
-/** AGENT_DESTINATIONS: where the send tool may post, e.g. {"team":{"channel":"C0123","rules":["all"]}}. */
-const destinations = Object.fromEntries(
-  Object.entries(JSON.parse(process.env.AGENT_DESTINATIONS ?? "{}") as Record<string, { channel: string; rules?: Rule[] }>).map(([name, d]) => [
-    name,
-    { address: { connector: "slack", conversation: d.channel, thread: "main" }, rules: d.rules ?? ["owner"] },
-  ]),
-);
-
 /** E-mail through Resend: off unless its key, webhook secret and address are set. */
 const email =
   process.env.RESEND_API_KEY && process.env.RESEND_WEBHOOK_SECRET && process.env.AGENT_EMAIL
@@ -154,7 +146,6 @@ const core = new Core({
     persona,
     modes,
     privacy,
-    destinations,
     repos,
     ...(process.env.AGENT_OWNER_NAME ? { ownerName: process.env.AGENT_OWNER_NAME } : {}),
     // AGENT_OWNER_DRAFTS=on: a mention of the owner gets a reply drafted in his name, to approve. Off by default: the

@@ -228,6 +228,23 @@ export function slackConnector(options: {
     } while (cursor);
   }
 
+  /** #name, <#C…|name> or C…/G… → the channel's id; null when it names no channel known to the bot. */
+  async function findChannel(given: string): Promise<string | null> {
+    const mention = /^<#([CG][A-Z0-9]+)(?:\|[^>]*)?>$/.exec(given);
+    if (mention) return mention[1]!;
+    if (/^[CG][A-Z0-9]{6,}$/.test(given)) return given;
+    if (!given.startsWith("#")) return null;
+    const wanted = given.slice(1).toLowerCase();
+    const lookup = () => [...channelNames].find(([, name]) => name.toLowerCase() === wanted)?.[0];
+    let id = lookup();
+    // A channel created since the start: the list is read again once.
+    if (!id) {
+      await loadMembership();
+      id = lookup();
+    }
+    return id ?? null;
+  }
+
   async function isMember(channel: string): Promise<boolean> {
     const known = member.get(channel);
     if (known !== undefined) return known;
@@ -458,9 +475,14 @@ export function slackConnector(options: {
       };
     },
 
-    /** A person (an id, a mention, a name or a first name, if only one person has it) → a direct message with them. */
+    /**
+     * A channel (#name, <#C…>, its id) → the channel itself; a person (an id, a mention, a name or a first name, if only
+     * one person has it) → a direct message with them.
+     */
     async resolve(person: string): Promise<Address | null> {
       try {
+        const channel = await findChannel(person.trim());
+        if (channel) return { connector: "slack", conversation: channel, thread: "main" };
         const given = person.trim().replace(/^<@([UW][A-Z0-9]+)(?:\|[^>]*)?>$/, "$1").replace(/^@/, "");
         let id = /^[UW][A-Z0-9]{6,}$/.test(given) ? given : undefined;
         if (!id) {

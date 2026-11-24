@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { allows, bind } from "./access.ts";
+import { bind } from "./access.ts";
 import { actTools } from "./act.ts";
 import { Prompts } from "./prompts.ts";
 import { inProgress, taskTools, taskVisible, type TaskRunner } from "./tasks.ts";
 import { digest } from "./history.ts";
 import type { Memory } from "./memory.ts";
 import { Store, type InboxRecord, type OutboxRecord, type ReminderRecord, type TaskRecord } from "./store.ts";
-import { TransientError, type Address, type BoundTool, type Brain, type Button, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Rule, type Scope, type ThreadMessage, type ToolContext, type ToolDef, type ToolResult } from "./types.ts";
+import { TransientError, type Address, type BoundTool, type Brain, type Button, type BrainRun, type Connector, type DeliverResult, type InboxRow, clock, localTime, mayRecall, threadOf, type Mode, type Privacy, type Post, type Scope, type ThreadMessage, type ToolContext, type ToolDef, type ToolResult } from "./types.ts";
 
 /** The images the model sees, and their size limit (the API's is 5 MB). */
 const IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -56,8 +56,6 @@ export type CoreConfig = {
   /** Engagement mode per place (mode_key), and the default. */
   modes: Record<string, Mode>;
   defaultMode: Mode;
-  /** At most this many bot or system messages in a row in a thread, within an hour, without a human. */
-  botCap: number;
   /** A disconnection longer than this triggers a catch-up at reconnection. */
   catchUpAfterMs: number;
   /** The catch-up never goes further back than this. */
@@ -66,8 +64,6 @@ export type CoreConfig = {
   catchUpStaleMs: number;
   /** false: every conversation recalls everything said elsewhere, private or not (see Privacy). */
   privacy: boolean;
-  /** Named places the send tool may post to, each with who may use it. */
-  destinations: Record<string, { address: Address; rules: Rule[] }>;
   maxRemindersPerThread: number;
   /** The repositories code tasks may work on; the first is the default. */
   repos: string[];
@@ -87,11 +83,9 @@ export const defaultConfig: Omit<CoreConfig, "ownerId" | "persona"> = {
   modes: {},
   defaultMode: "mention",
   privacy: true,
-  botCap: 20,
   catchUpAfterMs: 30_000,
   catchUpMaxMs: 24 * 3600_000,
   catchUpStaleMs: 3600_000,
-  destinations: {},
   maxRemindersPerThread: 5,
   ownerName: "the owner",
   draftForOwner: false,
@@ -146,7 +140,7 @@ class Slots {
   }
 }
 
-type Verdict = "kept" | "ignored" | "capped" | "draft";
+type Verdict = "kept" | "ignored" | "draft";
 
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -598,27 +592,13 @@ export class Core {
     return done;
   }
 
-  destinationNames(): string[] {
-    return Object.keys(this.config.destinations);
-  }
-
   /**
-   * A named destination, a person (a direct message, from any conversation: it writes to whoever it needs, like a
-   * colleague), or for the owner the thread of a message (message:<id>).
+   * A channel or a person (a direct message), as the connector finds them, or the thread of a message (message:<id>):
+   * from any conversation, it writes wherever it needs, like a colleague.
    */
   private async target(context: ToolContext, to: string): Promise<{ connector: Connector; address: Address } | string> {
-    const named = this.config.destinations[to];
-    if (named) {
-      if (!allows(named.rules, context.scope)) return `${to}: not allowed here.`;
-      const connector = this.connectors.get(named.address.connector);
-      return connector ? { connector, address: named.address } : `${to}: no connector.`;
-    }
     const message = /^message:(\d+)$/.exec(to);
     if (message) {
-      if (!context.scope.owner) {
-        const known = this.destinationNames();
-        return `Unknown destination: only the owner can post in another thread.${known.length ? ` Known: ${known.join(", ")}.` : ""}`;
-      }
       const row = this.store.inbox(Number(message[1]));
       // The same rule as the digest.
       if (!row || !mayRecall({ private: row.private, author: row.author_id }, context.scope, this.privacy)) return "No such message.";
@@ -626,11 +606,11 @@ export class Core {
       const address = threadOf(row.address);
       return connector ? { connector, address } : "No such message.";
     }
-    // A person: found by this conversation's connector, else by the first that knows people (from GitHub, Slack).
+    // A channel or a person: found by this conversation's connector, else by the first that knows them (from GitHub, Slack).
     const here = this.connectors.get(context.connector);
     const connector = here?.resolve ? here : [...this.connectors.values()].find((c) => c.resolve);
     const address = await connector?.resolve?.(to);
-    return connector && address ? { connector, address } : `Nobody named ${to}.`;
+    return connector && address ? { connector, address } : `Nothing named ${to}.`;
   }
 
   /**
@@ -862,7 +842,7 @@ export class Core {
     }
   }
 
-  /** What the core decides with the row's facts, never its payload: catch-up, engagement mode, bot cap. */
+  /** What the core decides with the row's facts, never its payload: catch-up, engagement mode. */
   private async verdict(row: InboxRecord): Promise<Verdict> {
     if (row.caught_up) {
       const seen = this.store.lastDeliveredAt(row.thread_key);
@@ -872,10 +852,6 @@ export class Core {
     }
     const kept = await this.engaged(row);
     if (!kept) return this.config.draftForOwner && row.mentions_owner && row.author_kind === "human" && row.author_id !== this.config.ownerId ? "draft" : "ignored";
-    if (row.author_kind !== "human") {
-      const since = new Date(Date.now() - 3600_000).toISOString();
-      if (this.store.nonHumanStreak(row.thread_key, row.id, since) > this.config.botCap) return "capped";
-    }
     return "kept";
   }
 
@@ -935,7 +911,7 @@ export class Core {
     return output.speak;
   }
 
-  /** From the head: what can be answered now. A system row goes alone; a failed, ignored or capped row is closed here. */
+  /** From the head: what can be answered now. A system row goes alone; a failed or ignored row is closed here. */
   private async pick(thread: string, verdicts: Map<number, Verdict>): Promise<InboxRecord[]> {
     const lot: InboxRecord[] = [];
     const due = new Date().toISOString();
@@ -968,12 +944,6 @@ export class Core {
         this.gateReactions.delete(row.id);
         this.store.close(row, "ignored", reaction ? { reaction } : undefined, reaction);
         if (reaction) queueMicrotask(() => this.wake());
-        continue;
-      }
-      if (verdict === "capped") {
-        const announce = !this.store.cappedSinceHuman(row.thread_key);
-        this.store.cap(row, announce);
-        if (announce) queueMicrotask(() => this.wake());
         continue;
       }
       // A system row or a draft for the owner goes alone.

@@ -159,15 +159,14 @@ test("a failure before the lot is charged to the row that failed, not to the hea
 test("send: two messages to the same place in one turn both leave; a re-run finds both sent", async () => {
   const world = new World();
   const connector = new FakeConnector(world);
-  const team = { address: { connector: "fake", conversation: "team", thread: "main" }, rules: ["all" as const] };
-  const core = makeCore(freshDb(), connector, echoBrain().brain, { destinations: { team } });
+  const core = makeCore(freshDb(), connector, echoBrain().brain);
   const turn = () => ({ scope: { owner: true, requester: "ronan", private: true }, threadKey: "fake:t1", lotIds: [1], connector: "fake", address: { connector: "fake", conversation: "t1", thread: "main" }, sent: new Map<string, number>() });
   const first = turn();
-  assert.equal(await core.send(first, "team", "announcement one"), "Sent.");
-  assert.equal(await core.send(first, "team", "announcement two"), "Sent.");
+  assert.equal(await core.send(first, "#team", "announcement one"), "Sent.");
+  assert.equal(await core.send(first, "#team", "announcement two"), "Sent.");
   const rerun = turn();
-  assert.match(await core.send(rerun, "team", "Announcement 1"), /Already sent/);
-  assert.match(await core.send(rerun, "team", "Announcement 2"), /Already sent/);
+  assert.match(await core.send(rerun, "#team", "Announcement 1"), /Already sent/);
+  assert.match(await core.send(rerun, "#team", "Announcement 2"), /Already sent/);
   assert.equal(connector.sent.filter((s) => s.address.conversation === "team").length, 2);
   core.kill();
 });
