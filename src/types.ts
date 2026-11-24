@@ -125,7 +125,7 @@ export interface Connector {
   remove?(address: Address, ref: string): Promise<void>;
   /** It delivers { reaction } posts: the triage gate may then react where the agent stays silent. */
   reacts?: boolean;
-  /** A person (name or id) → the address of a direct message with them, or null. */
+  /** A channel (#name, id) or a person (name, id) → the address to post there (a person: a direct message), or null. */
   resolve?(person: string): Promise<Address | null>;
   /** The thread_key its rows carry for this address. Default: connector:conversation:thread. */
   threadKeyOf?(address: Address): string;

@@ -60,30 +60,6 @@ test("triage: the gate decides, outside the respond() quota", async () => {
   core.kill();
 });
 
-test("bot cap: past the cap the agent stops once, says so once, and a human resets it", async () => {
-  const world = new World();
-  const connector = new FakeConnector(world);
-  const core = makeCore(freshDb(), connector, echoBrain().brain, { botCap: 3 });
-  await core.start();
-  const bot = (text: string) => world.say(text, { author: "otherbot", kind: "bot", dm: false, mention: true, ownerOnly: false });
-  for (let i = 1; i <= 3; i++) {
-    core.ingest(bot(`ping ${i}`), "fake");
-    await waitFor(() => repliesIn(connector, "t1").length === i);
-  }
-  core.ingest(bot("ping 4"), "fake");
-  await waitFor(() => repliesIn(connector, "t1").some((s) => "text" in s.post && s.post.text.startsWith("I'm stopping")));
-  core.ingest(bot("ping 5"), "fake");
-  await waitFor(() => core.store.events("fake:t1").filter((e) => e.kind === "capped").length === 2);
-  await sleep(50);
-  assert.equal(repliesIn(connector, "t1").filter((s) => "text" in s.post && s.post.text.startsWith("I'm stopping")).length, 1);
-  const before = repliesIn(connector, "t1").length;
-  core.ingest(world.say("@agent humans are back", { dm: false, mention: true }), "fake");
-  await waitFor(() => repliesIn(connector, "t1").length === before + 1);
-  core.ingest(bot("ping 6"), "fake");
-  await waitFor(() => repliesIn(connector, "t1").length === before + 2);
-  core.kill();
-});
-
 test("catch-up: from the frozen cursor; stale or already-seen messages are ignored, a missed DM is answered", async () => {
   const world = new World();
   const path = freshDb();

@@ -55,7 +55,7 @@ a{color:#2457C5}a:hover{color:#1A3F91}
   toInbox(raw: unknown): Promise&lt;InboxRow | null&gt;; <span style="color: #6B6B65">// null: not for it (non-member, refused)</span>
   catchUp?(since: string): AsyncIterable&lt;unknown&gt;;  <span style="color: #6B6B65">// from the stored cursor; error → the pass fails</span>
   read(address: Address): Promise&lt;Thread&gt;;   <span style="color: #6B6B65">// up to this message incl.; readable + place label</span>
-  resolve?(person: string): Promise&lt;Address | null&gt;;  <span style="color: #6B6B65">// a person → their DM; named destinations = config</span>
+  resolve?(person: string): Promise&lt;Address | null&gt;;  <span style="color: #6B6B65">// #channel → the channel; a person → their DM</span>
   threadKeyOf?(address: Address): string;    <span style="color: #6B6B65">// the thread_key of its rows for this address</span>
   form: { schema(row: InboxRow, scope: Scope): ZodType;
           prompts: Record&lt;string, string&gt;;  <span style="color: #6B6B65">// its prompt files, with defaults</span>

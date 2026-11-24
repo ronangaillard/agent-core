@@ -64,8 +64,7 @@ in his name, search), `AGENT_OWNER_DRAFTS` (`on`: a mention of the owner gets a 
 needs `SLACK_USER_TOKEN` and `AGENT_OWNER_CHANNEL`; off by default), `AGENT_MODES` (JSON, mode_key → `mention` | `mention-sticky` | `triage`), `AGENT_MEMORY_WRITERS` (`all`: every conversation writes the
 memory's `common/`, not only the owner's; the persona is never in it), `AGENT_PRIVACY` (`off`: every
 conversation recalls everything said elsewhere, private or not; for one trusted team), `CLAUDE_MODEL`,
-`CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_TASK_MODEL` (code tasks, default `opus`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DESTINATIONS` (JSON, name →
-`{"channel": "C…", "rules": ["all"]}`, owner-only by default), `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no web view: the tables read-only, the
+`CLAUDE_GATE_MODEL` (triage, default `haiku`), `CLAUDE_TASK_MODEL` (code tasks, default `opus`), `CLAUDE_CODE_EXECUTABLE`, `AGENT_DEBUG_PORT` and `AGENT_DEBUG_PASSWORD` (both, or no web view: the tables read-only, the
 prompts and the memory read and edited; basic auth with user `debug`; it shows private conversations and changes what the
 agent is told), `AGENT_SHELVES` (JSON, name → folder: read-only
 folders the memory tools also read, for everyone, never written nor put in the prompt; e.g. `{"code":"/app/src"}`
@@ -136,8 +135,7 @@ drafting), a SIGTERM, transient and durable errors, a burst, the per-thread lock
 Step 1, done: the durable core end to end, the Slack connector (a DM gets a reply).
 
 Step 2, done: engagement modes per place (`mention`, `mention-sticky`, `triage` by a cheap model, outside the
-`respond()` quota), the bot-to-bot cap (bot or system messages in a row within an hour, one "I'm stopping" post,
-reset by a human), the catch-up from a cursor frozen before connecting and at disconnection, tools with rules
+`respond()` quota), the catch-up from a cursor frozen before connecting and at disconnection, tools with rules
 checked twice, the Markdown memory, the `<elsewhere>` digest and the conversation search with the privacy rule (local times, `message:<id>` on
 each line), and `read_conversation`, which reads the whole conversation of a `message:<id>` under the same rule.
 `search_messages` (the owner's alone unless `AGENT_PRIVACY=off`, when a connector can `search`: Slack with `SLACK_USER_TOKEN` and `search:read`)
@@ -149,7 +147,7 @@ from the gate when the agent stays silent; only to a connector that `reacts` (Sl
 written with the reply or the closing (never sent twice), never held nor in the owner's name, never an alert when lost.
 
 Step 3, done:
-- `send` to a named destination (with its rules), or for the owner to a person (`resolve`) or to the thread of a
+- `send`, from any conversation, to any channel or person (`resolve`: `#name`, a name) or to the thread of a
   message (`message:<id>`, same privacy rule as the digest). The idempotency key and an `acted` event are written
   with the outbox row before the call: the same send never leaves twice; an ambiguous failure is reported as
   "status unknown" and never retried; a definite failure frees the key.
@@ -175,7 +173,7 @@ Step 4, done:
   References, which the sender sets, plus who writes: never the subject), the sender's address as author (never
   the owner's scope or identity, even from his address), replies in the e-mail thread (In-Reply-To, References), a
   form where the agent says whether it is sure.
-- Polls need no code of their own: `send` to people, and a destination for the owner.
+- Polls need no code of their own: `send` to people or to a channel.
 
 Step 5, done: code tasks (`tasks` table: one copy, one branch, one PR each).
 - `start_code_task`: with no number, it continues the only task open in the conversation, or starts one; with a
