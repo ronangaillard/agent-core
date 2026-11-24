@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   thread_key TEXT,
   created_by TEXT,
   private INTEGER NOT NULL DEFAULT 0,
+  owner_asked INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reminders_due ON reminders (due_at);
@@ -123,6 +124,9 @@ export function openDb(path: string): DatabaseSync {
   // Added since: where a task's reports go when it was last asked from another conversation.
   const taskColumns = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
   if (!taskColumns.includes("report_address")) db.exec("ALTER TABLE tasks ADD COLUMN report_address TEXT; ALTER TABLE tasks ADD COLUMN report_thread_key TEXT;");
+  // Added since: a reminder set by the owner in his private conversation fires with his rights.
+  const reminderColumns = (db.prepare("PRAGMA table_info(reminders)").all() as { name: string }[]).map((c) => c.name);
+  if (!reminderColumns.includes("owner_asked")) db.exec("ALTER TABLE reminders ADD COLUMN owner_asked INTEGER NOT NULL DEFAULT 0;");
   return db;
 }
 

@@ -433,7 +433,8 @@ export class Core {
       mode_key: due.thread_key,
       author_id: "scheduler",
       author_kind: "system",
-      owner_only: false,
+      // Set by the owner in his private conversation: it acts with his rights, like him (see scopeOf).
+      owner_only: due.owner_asked,
       private: due.private,
       dm: false,
       mentions_agent: false,
@@ -457,6 +458,7 @@ export class Core {
       thread_key: context.threadKey,
       created_by: context.scope.requester,
       private: context.scope.private,
+      owner_asked: context.scope.owner,
     });
     this.arm();
     return `Reminder #${id} set for ${at}.`;
@@ -1131,7 +1133,9 @@ export class Core {
       owner: lot.every(
         (row) =>
           (row.author_kind === "human" && row.owner_only && row.author_id === this.config.ownerId) ||
-          (row.author_kind === "system" && this.config.ownerSources.includes(row.connector)),
+          (row.author_kind === "system" && this.config.ownerSources.includes(row.connector)) ||
+          // A reminder the owner set in his private conversation (reminderRow): his rights, as when he set it.
+          (row.author_kind === "system" && row.author_id === "scheduler" && row.owner_only),
       ),
       requester: last.author_id,
       private: lot.some((row) => row.private),

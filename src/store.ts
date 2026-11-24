@@ -43,6 +43,8 @@ export type ReminderRecord = {
   thread_key: string | null;
   created_by: string | null;
   private: boolean;
+  /** Set by the owner in his private conversation: it fires with his rights (memory, private/). */
+  owner_asked: boolean;
 };
 
 const reminderOf = (r: Row): ReminderRecord => ({
@@ -57,6 +59,7 @@ const reminderOf = (r: Row): ReminderRecord => ({
   thread_key: r.thread_key === null ? null : String(r.thread_key),
   created_by: r.created_by === null ? null : String(r.created_by),
   private: Boolean(r.private),
+  owner_asked: Boolean(r.owner_asked),
 });
 
 /** failed: the last run failed; it stays open (continued like a waiting one). abandoned: stopped for good. */
@@ -349,14 +352,14 @@ export class Store {
 
   // --- reminders and jobs --------------------------------------------------------------------------------------
 
-  addReminder(r: { due_at: string; repeat_minutes: number | null; note: string; connector: string; address: Address; thread_key: string; created_by: string; private: boolean }): number {
+  addReminder(r: { due_at: string; repeat_minutes: number | null; note: string; connector: string; address: Address; thread_key: string; created_by: string; private: boolean; owner_asked?: boolean }): number {
     return tx(this.db, () => {
       const result = this.db
         .prepare(
-          `INSERT INTO reminders (kind, due_at, repeat_minutes, note, connector, address, thread_key, created_by, private, created_at)
-           VALUES ('reminder', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO reminders (kind, due_at, repeat_minutes, note, connector, address, thread_key, created_by, private, owner_asked, created_at)
+           VALUES ('reminder', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(r.due_at, r.repeat_minutes, r.note, r.connector, JSON.stringify(r.address), r.thread_key, r.created_by, r.private ? 1 : 0, now());
+        .run(r.due_at, r.repeat_minutes, r.note, r.connector, JSON.stringify(r.address), r.thread_key, r.created_by, r.private ? 1 : 0, r.owner_asked ? 1 : 0, now());
       const id = Number(result.lastInsertRowid);
       this.event({ kind: "reminder_set", thread_key: r.thread_key, author_id: r.created_by, private: r.private, ref: id, payload: { note: r.note, due_at: r.due_at } });
       return id;
