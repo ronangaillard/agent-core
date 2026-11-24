@@ -39,6 +39,8 @@ type SlackMessage = {
   files?: { id?: string; name?: string; title?: string; mimetype?: string; preview?: string }[];
   /** Unfurls and bots' attachments. */
   attachments?: { pretext?: string; title?: string; text?: string; fallback?: string }[];
+  /** Its reactions: the emoji, how many, and who (Slack may list fewer users than the count). */
+  reactions?: { name?: string; count?: number; users?: string[] }[];
   /** A click on a button under the agent's post (that post's ts): an answer to the agent, as good as a mention. */
   clicked?: string;
 };
@@ -301,7 +303,7 @@ export function slackConnector(options: {
     return unslack(text, (id) => known.get(id) ?? id);
   }
 
-  /** What a message says: its text, its files (and the start of a long paste), its attachments. */
+  /** What a message says: its text, its files (and the start of a long paste), its attachments, its reactions. */
   async function readable(m: SlackMessage): Promise<string> {
     const parts = [m.text ?? ""];
     for (const file of m.files ?? []) {
@@ -311,6 +313,15 @@ export function slackConnector(options: {
     for (const a of m.attachments ?? []) {
       const text = [a.pretext, a.title, a.text].filter(Boolean).join("\n") || a.fallback;
       if (text) parts.push(`[attachment] ${text}`);
+    }
+    if (m.reactions?.length) {
+      const each = await Promise.all(
+        m.reactions.map(async (r) => {
+          const who = await Promise.all((r.users ?? []).map((u) => (u === self.userId ? "you" : nameOf(u))));
+          return `:${r.name}: ${r.count ?? who.length}${who.length ? ` (${who.join(", ")})` : ""}`;
+        }),
+      );
+      parts.push(`[reactions: ${each.join(" · ")}]`);
     }
     return plain(parts.filter(Boolean).join("\n"));
   }
